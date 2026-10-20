@@ -211,11 +211,13 @@ Future<void> main(List<String> args) async {
         if (!state.codeSettled) throw StateError('登录码还没取到，再等一拍');
         // 状态落定 ≠ 画面已更新：等当帧画完再抓，不然截到的还是旧帧。
         await WidgetsBinding.instance.endOfFrame;
-        final ctx = key.currentContext;
-        if (ctx == null) throw StateError('boundary 尚未挂载');
-        final boundary = ctx.findRenderObject()! as RenderRepaintBoundary;
-        // 3× 密度栅格化：窗口被屏幕压小后按逻辑 1× 抓会糊，README 里缩放也要保清晰。
-        final image = await boundary.toImage(pixelRatio: 3.0);
+        // async gap 之后直接从 GlobalKey 现取 boundary，不存 ctx 变量。
+        final ro = key.currentContext?.findRenderObject();
+        if (ro is! RenderRepaintBoundary) throw StateError('boundary 尚未挂载');
+        // 出图密度自适应：目标 ≈2× 设计宽（1043×2=2086px）——窗口被屏幕压小
+        // 就用更高密度补回清晰度（封顶 3×），窗口已到设计尺寸就正好 2×。
+        final density = (2086 / ro.size.width).clamp(1.0, 3.0);
+        final image = await ro.toImage(pixelRatio: density);
         final data = await image.toByteData(format: ui.ImageByteFormat.png);
         if (data == null) throw StateError('PNG 编码返回空');
         File(outPath).writeAsBytesSync(data.buffer.asUint8List(), flush: true);

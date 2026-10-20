@@ -57,6 +57,7 @@ class _EzShellState extends State<EzShell> {
       case EzHit.doc: s.openManual();
       case EzHit.log: s.openLogsFolder();
       case EzHit.codeRow: s.onCodeRowTapped();
+      case EzHit.codeRefresh: s.onCodeRefreshTapped();
       case EzHit.toggleTray: s.toggleRow(1);
       case EzHit.toggleDbl: s.toggleRow(2);
       case EzHit.toggleStart: s.toggleRow(4);
@@ -365,7 +366,8 @@ class EzShellPainter extends CustomPainter {
       switch (i) {
         case 0:
           // ★ 登录码行（2026-10-19 用户钦定：取到的 6 位码直观显示，第一行）。
-          _codeRow(c, cy, u.rowT[0], u.rowS[0], u.codeText, u.codeReady);
+          _codeRow(c, cy, u.rowT[0], u.rowS[0], u.codeText, u.codeReady,
+              hover == EzHit.codeRefresh);
         case 1:
           _row(c, cy, _IcoKind.tray, u.rowT[1], u.rowS[1], u.rowOn[1]);
         case 2:
@@ -404,10 +406,18 @@ class EzShellPainter extends CustomPainter {
     _toggle(c, Geo.togX, cy + 2, on);
   }
 
-  /// 登录码行：左侧标题+状态副标题，右侧（拨杆位）大字直观显示 6 位码。
-  /// 点行 = 复制（有码）/重取（无码），命中区整行（kRowToggles[0]=codeRow）。
-  void _codeRow(Canvas c, double cy, String title, String sub, String code, bool ready) {
-    _icon(c, _IcoKind.refresh, _rowIconBox(cy), Pal.iconNavy);
+  /// 登录码行：左侧 ↻ 图标兼任「取新码」钮（悬停亮玻璃圆底），右侧大字显示码。
+  /// 点行 = 复制（有码）/重取（无码），命中区整行（kRowToggles[0]=codeRow）；
+  /// 点左图标 = 无视现有码直接再取新码（codeIcoHit → codeRefresh）。
+  void _codeRow(Canvas c, double cy, String title, String sub, String code, bool ready,
+      bool hov) {
+    final icoBox = _rowIconBox(cy);
+    if (hov) {
+      // 悬停才亮出的玻璃圆底：图标本身兼任按钮，平时不占一分版面。
+      final halo = Rect.fromCircle(center: icoBox.center, radius: 31);
+      glass(c, halo, 31, Pal.aPill + 40, 170, 2);
+    }
+    _icon(c, _IcoKind.refresh, icoBox, hov ? Pal.iconBlue : Pal.iconNavy);
     // 右侧给码留 200 设计px（6 位 40px 粗体 ≈150 宽 + 右缩进 41），文字在码左沿收。
     final maxw = Geo.cr - 200 - Geo.c3TxX;
     ezTxt(c, title, EzFont.fC3t(Pal.ink), Geo.c3TxX, cy - 13, EzAlign.left, maxW: maxw);

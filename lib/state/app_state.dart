@@ -334,6 +334,12 @@ class AppState extends ChangeNotifier {
     unawaited(refreshDisplayedCode());
   }
 
+  /// 点「取新码」圆钮：不管现在有没有码，直接再取一次 —— 这就是「随时手动
+  /// 要一个当前有效码」的入口。连点有 _codeFetching 闸着，不会并发。
+  void onCodeRefreshTapped() {
+    unawaited(refreshDisplayedCode());
+  }
+
   /// 取一次登录码给设置卡显示。失败不弹窗（副标题报「取码失败 · 点击重试」，
   /// 详情在日志）。不 busy 面板 —— 这只是个展示行，别影响主流程观感。
   Future<void> refreshDisplayedCode() async {

@@ -114,6 +114,11 @@ abstract final class Geo {
   static const double togW = 78, togH = 42, togInset = 41;
   static double get togX => cr - togInset - togW;
 
+  // 行 0 左侧 ↻ 图标兼任「取新码」钮：平时是普通行图标，悬停才亮出玻璃圆底，
+  // 不额外占版面（2026-10-20 用户钦定：不要右侧单独按钮，就融进这个图标）。
+  static Rect get codeIcoHit => Rect.fromLTWH(
+      c3IcoX - 10, c3Row1Cy - c3IcoH / 2 - 10, c3IcoW + 20, c3IcoH + 20);
+
   // 设置卡动作行红方块（2026-09-21 晚：母本 EzMMB WideSlot 同款几何）
   static const double rowBtnW = 437.5, rowBtnH = 84, rowBtnRad = 24;
   static double get rowBtnX => cr - togInset - rowBtnW; // 右沿与拨杆同一条边
@@ -494,6 +499,7 @@ enum EzHit {
   doc,
   log,
   codeRow,
+  codeRefresh,
   toggleTray,
   toggleDbl,
   relogin,
@@ -546,6 +552,8 @@ EzHit ezHit(double x, double y) {
   for (var i = 0; i < 5; i++) {
     final cy = Geo.c3RowCy(i);
     if (y < cy - 48 || y > cy + 48) continue;
+    // 行 0 左侧 ↻ 图标 = 取新码，先于整行判定（其余行图标不单独命中）。
+    if (i == 0 && Geo.codeIcoHit.contains(Offset(x, y))) return EzHit.codeRefresh;
     if (x < Geo.c3TxX) continue;
     final hit = kRowToggles[i];
     if (hit == null) {
