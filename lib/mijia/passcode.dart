@@ -35,10 +35,20 @@ class PasscodeError implements Exception {
 ///   取码被拒且像鉴权问题时：清票据缓存 → 强制换一张新票 → 同一 did 立刻
 ///   重试一次（每轮 fetchCode 只自动续期一次）。续期还失败才走原来的
 ///   WaitMin 重试 / 「登录已失效」收轮路 —— 那时才是真的要人工登录。
+///
+/// [preferredDid]：调用方已明确知道的设备号（如 EzVibe 配置里的 lan_did）
+/// —— 插队到候选列表最前，仍失败再走自动候选（本地取码服务透传用）。
 Future<(String, Map<String, Object?>)> fetchCode(String hubIp,
-    {void Function(Object?)? log, Map<String, Object?>? cfg}) async {
+    {void Function(Object?)? log,
+    Map<String, Object?>? cfg,
+    String? preferredDid}) async {
   final c = cfg ?? loadCfg();
   final dids = await candidateDids(c, hubIp, log: log);
+  if (preferredDid != null && preferredDid.trim().isNotEmpty) {
+    final d = preferredDid.trim();
+    dids.remove(d);
+    dids.insert(0, d);
+  }
   if (dids.isEmpty) {
     throw PasscodeError('没有可用的设备 did，云端设备列表也拿不到');
   }

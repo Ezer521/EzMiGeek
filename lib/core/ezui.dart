@@ -118,11 +118,6 @@ abstract final class Geo {
   static const double rowBtnW = 437.5, rowBtnH = 84, rowBtnRad = 24;
   static double get rowBtnX => cr - togInset - rowBtnW; // 右沿与拨杆同一条边
 
-  /// ⓘ说明行的左沿 —— 现在在卡片**外面**、「一般设置」标题右侧
-  /// （用户指定：那行"重新登录成功"的小字移到上面箭头指的地方）。
-  /// 固定位移 130：中英文标题几乎同宽，一个常数对两种语言都成立。
-  static double get c3InfoX => secX + 130;
-
   // ---- 行中线 / 设置卡高 / 底部钮 / 页脚（SetRows=5 定稿值）
   static double c3RowCy(int i) => c3Row1Cy + i * c3RowStep; // 726/867/1008/1149/1290
   static double c3DivY(int i) => c3RowCy(i) + 48;
@@ -498,24 +493,27 @@ enum EzHit {
   tray,
   doc,
   log,
-  toggle0,
-  toggle1,
-  toggle2,
-  toggle3,
+  codeRow,
+  toggleTray,
+  toggleDbl,
   relogin,
+  toggleStart,
   lang,
   min,
   max,
   close,
 }
 
-/// 行号 → 拨杆 Hit；`null` = 动作行（重新登录），那一行没有拨杆。
-/// ★ 顺序必须与设置卡的行序一致（改行序 = 三处同步：这里、_card3、fill_state）。
+/// 行号 → 命中；`null` = 动作行（重新登录），那一行命中区只有红方块本身。
+/// ★ 顺序必须与设置卡的行序一致（改行序 = 三处同步：这里、_card3、
+///   _fillSettingsRows）。现行行序（2026-10-19 用户钦定，当晚二改：
+///   重登与自启互换、动作行回末行）：
+///   0 登录码显示 → 1 收进托盘 → 2 双击开网页 → 3 开机自启 → 4 重新登录。
 const List<EzHit?> kRowToggles = [
-  EzHit.toggle0,
-  EzHit.toggle1,
-  EzHit.toggle2,
-  EzHit.toggle3,
+  EzHit.codeRow,
+  EzHit.toggleTray,
+  EzHit.toggleDbl,
+  EzHit.toggleStart,
   null, // 动作行（重新登录）
 ];
 

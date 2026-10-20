@@ -22,6 +22,7 @@ import 'app.dart';
 import 'core/app_dirs.dart';
 import 'core/i18n.dart';
 import 'services/app_log.dart';
+import 'services/code_service.dart';
 import 'services/dialogs.dart';
 import 'services/legal.dart';
 import 'services/single_instance.dart';
@@ -125,6 +126,11 @@ Future<void> main(List<String> args) async {
   // ── 业务回调 + 托盘 ──
   final tray = TrayService();
 
+  // ── 本地取码服务：把已登录的取码能力开放给本机 Ez 系软件（EzVibe 商店
+  //    版的取码通道）。失败只记日志，绝不拖垮主程序。出图模式不起。
+  final codeService = CodeService();
+  if (!uiPng) await codeService.start();
+
   Future<void> hideToTray() async {
     AppLog.write('面板「收起到托盘」。');
     await windowManager.hide();
@@ -132,7 +138,10 @@ Future<void> main(List<String> args) async {
 
   Future<void> exitApp() async {
     await state.quit();
-    if (!uiPng) await tray.dispose();
+    if (!uiPng) {
+      await codeService.stop();
+      await tray.dispose();
+    }
     singleton?.dispose();
     AppLog.close();
     AppLog.write('程序退出，托盘已清理（本轮浏览器按原版约定保留）。');

@@ -56,10 +56,10 @@ class _EzShellState extends State<EzShell> {
       case EzHit.tray: s.onHideToTray?.call();
       case EzHit.doc: s.openManual();
       case EzHit.log: s.openLogsFolder();
-      case EzHit.toggle0: s.toggleRow(0);
-      case EzHit.toggle1: s.toggleRow(1);
-      case EzHit.toggle2: s.toggleRow(2);
-      case EzHit.toggle3: s.toggleRow(3);
+      case EzHit.codeRow: s.onCodeRowTapped();
+      case EzHit.toggleTray: s.toggleRow(1);
+      case EzHit.toggleDbl: s.toggleRow(2);
+      case EzHit.toggleStart: s.toggleRow(4);
       case EzHit.relogin: s.startRelogin();
       case EzHit.lang: s.toggleLang();
       case EzHit.min: windowMin();
@@ -153,7 +153,6 @@ class EzShellPainter extends CustomPainter {
     _header(c);
     _card1(c);
     _buttonRow(c);
-    ezTxt(c, state.ui.secTitle, EzFont.fSec(Pal.ink), Geo.secX, Geo.secCy, EzAlign.left);
     _infoLine(c);
     _card3(c);
     _bottomRow(c);
@@ -356,7 +355,7 @@ class EzShellPainter extends CustomPainter {
     ezTxt(c, label, EzFont.fBtn(fg), x0 + iw + Geo.btnIcoGap, cy, EzAlign.left);
   }
 
-  // ── 设置卡（5 行：4 拨杆 + 1 动作行）──
+  // ── 设置卡（5 行：登录码 + 3 拨杆 + 1 动作行）──
   void _card3(Canvas c) {
     glass(c, Rect.fromLTWH(Geo.cl, Geo.c3y, Geo.cw, Geo.c3h), Geo.cardRad, Pal.aCard, 205, 2.2);
 
@@ -365,15 +364,16 @@ class EzShellPainter extends CustomPainter {
       final cy = Geo.c3RowCy(i);
       switch (i) {
         case 0:
-          _row(c, cy, _IcoKind.power, u.rowT[0], u.rowS[0], u.rowOn[0]);
+          // ★ 登录码行（2026-10-19 用户钦定：取到的 6 位码直观显示，第一行）。
+          _codeRow(c, cy, u.rowT[0], u.rowS[0], u.codeText, u.codeReady);
         case 1:
           _row(c, cy, _IcoKind.tray, u.rowT[1], u.rowS[1], u.rowOn[1]);
         case 2:
           _row(c, cy, _IcoKind.monitor, u.rowT[2], u.rowS[2], u.rowOn[2]);
         case 3:
-          _row(c, cy, _IcoKind.monitor, u.rowT[3], u.rowS[3], u.rowOn[3]);
+          _row(c, cy, _IcoKind.power, u.rowT[3], u.rowS[3], u.rowOn[3]);
         case 4:
-          // ★ 动作行挪在最后一行：四个开关一组、一颗动作按钮收尾。
+          // ★ 动作行（重新登录）收尾：三个开关 + 一颗动作按钮。
           _rowBtn(c, cy, _IcoKind.refresh, u.rowT[4], u.rowS[4], u.row5Act, u.row5Btn,
               hover == EzHit.relogin);
       }
@@ -384,11 +384,12 @@ class EzShellPainter extends CustomPainter {
     }
   }
 
-  /// ⓘ说明行 —— 在卡片**外面**、「一般设置」标题右侧（用户钦定的位置）。
+  /// ⓘ说明行 —— 在卡片**外面**、设置卡上沿那行（原「一般设置」标题位，
+  /// 2026-10-19 用户去掉标题四字后由说明行顶位，左沿 = secX）。
   void _infoLine(Canvas c) {
     final dd = Geo.c3InfoIcoD;
-    icoInfo(c, Rect.fromLTWH(Geo.c3InfoX, Geo.secCy - dd / 2, dd, dd), Pal.info);
-    ezTxt(c, state.ui.infoLine, EzFont.fInfo(Pal.ink2), Geo.c3InfoX + dd + 15, Geo.secCy,
+    icoInfo(c, Rect.fromLTWH(Geo.secX, Geo.secCy - dd / 2, dd, dd), Pal.info);
+    ezTxt(c, state.ui.infoLine, EzFont.fInfo(Pal.ink2), Geo.secX + dd + 15, Geo.secCy,
         EzAlign.left);
   }
 
@@ -401,6 +402,18 @@ class EzShellPainter extends CustomPainter {
     ezTxt(c, title, EzFont.fC3t(Pal.ink), Geo.c3TxX, cy - 13, EzAlign.left, maxW: maxw);
     ezTxt(c, sub, EzFont.fC3s(Pal.ink2), Geo.c3TxX, cy + 13.5, EzAlign.left, maxW: maxw);
     _toggle(c, Geo.togX, cy + 2, on);
+  }
+
+  /// 登录码行：左侧标题+状态副标题，右侧（拨杆位）大字直观显示 6 位码。
+  /// 点行 = 复制（有码）/重取（无码），命中区整行（kRowToggles[0]=codeRow）。
+  void _codeRow(Canvas c, double cy, String title, String sub, String code, bool ready) {
+    _icon(c, _IcoKind.refresh, _rowIconBox(cy), Pal.iconNavy);
+    // 右侧给码留 200 设计px（6 位 40px 粗体 ≈150 宽 + 右缩进 41），文字在码左沿收。
+    final maxw = Geo.cr - 200 - Geo.c3TxX;
+    ezTxt(c, title, EzFont.fC3t(Pal.ink), Geo.c3TxX, cy - 13, EzAlign.left, maxW: maxw);
+    ezTxt(c, sub, EzFont.fC3s(Pal.ink2), Geo.c3TxX, cy + 13.5, EzAlign.left, maxW: maxw);
+    final style = EzFont.f(40, bold: true, color: ready ? Pal.iconBlue : Pal.ink3);
+    ezTxt(c, code, style, Geo.cr - Geo.togInset, cy + 2, EzAlign.right);
   }
 
   void _rowBtn(Canvas c, double cy, _IcoKind ik, String title, String sub, bool enabled,

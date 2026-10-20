@@ -31,6 +31,7 @@ import '../model/stats_store.dart';
 import '../services/agent_js.dart';
 import '../services/app_log.dart';
 import '../services/autostart.dart';
+import '../services/clipboard.dart';
 
 import '../services/dialogs.dart';
 import '../services/legal.dart';
@@ -48,12 +49,13 @@ class UiFields {
   bool warn = false;
   String mainLabel = '';
   bool canAct = true;
-  String secTitle = '';
   String infoLine = '';
   // 设置卡 5 行
   final List<String> rowT = List.filled(5, '');
   final List<String> rowS = List.filled(5, '');
   final List<bool> rowOn = List.filled(5, false);
+  String codeText = '······'; // 行 0 右侧大字：6 位码（未取到时占位）
+  bool codeReady = false; // 码可用（点行=复制）还是占位/失败（点行=重取）
   String row5Btn = '';
   bool row5Act = true;
   String btnTray = '', btnDoc = '', btnLog = '';
@@ -145,7 +147,6 @@ class AppState extends ChangeNotifier {
 
     u.mainLabel = t('btn.main');
     u.canAct = !_busy;
-    u.secTitle = t('sec.general');
     u.infoLine = _say(_info).isEmpty ? t('info.idle') : _say(_info);
 
     u.btnTray = t('btn.tray');
@@ -156,12 +157,16 @@ class AppState extends ChangeNotifier {
   }
 
   /// 设置卡 5 行的字段填入（与 `panel.fill_state` 的行序/字段映射完全一致）。
+  /// ★ 行序（2026-10-19 用户钦定，当晚二改：重登与自启互换、动作行回末行）：
+  ///   0 登录码显示 → 1 收进托盘 → 2 双击开网页 → 3 开机自启 → 4 重新登录。
   void _fillSettingsRows() {
     final u = ui;
-    // 行 0：开机自动启动（副标题报注册表真值）
-    u.rowT[0] = t('row.autostart');
-    u.rowS[0] = autostartSubtitle();
-    u.rowOn[0] = settings.autoStart;
+    // 行 0：当前登录码（右侧大字显示，点行=复制/重取）
+    u.rowT[0] = t('row.code');
+    u.rowS[0] = _codeSubtitle();
+    u.rowOn[0] = false;
+    u.codeText = _displayCode.isEmpty ? '······' : _displayCode;
+    u.codeReady = _codeState == 'ok' || _codeState == 'copied';
     // 行 1：登录成功后收进托盘
     u.rowT[1] = t('row.traydone');
     u.rowS[1] = t('row.traydone.sub');
@@ -170,11 +175,11 @@ class AppState extends ChangeNotifier {
     u.rowT[2] = t('row.dblopen');
     u.rowS[2] = t('row.dblopen.sub');
     u.rowOn[2] = settings.autoDblOpenWeb;
-    // 行 3：打开网页时全屏
-    u.rowT[3] = t('row.fullscreen');
-    u.rowS[3] = t('row.fullscreen.sub');
-    u.rowOn[3] = settings.autoFullscreen;
-    // 行 4：★ 重新登录小米账号（动作行）
+    // 行 3：开机自动启动（副标题报注册表真值）
+    u.rowT[3] = t('row.autostart');
+    u.rowS[3] = autostartSubtitle();
+    u.rowOn[3] = settings.autoStart;
+    // 行 4：★ 重新登录小米账号（动作行，收尾）
     u.rowT[4] = t('row.relogin');
     u.rowS[4] = t('row.relogin.sub');
     u.rowOn[4] = false; // 动作行没有拨杆（右上是按钮，不是开关）
@@ -226,19 +231,19 @@ class AppState extends ChangeNotifier {
   }
 
   // ════════════════════════ 设置卡拨动（拨动即存）══════════════════════
+  // 行序：0 登录码（无拨杆，点行走 onCodeRowTapped）1 收托盘 2 双击开网页
+  // 3 开机自启 4 重登（动作行）。
   void toggleRow(int row) {
     switch (row) {
-      case 0:
-        settings.autoStart = !settings.autoStart;
       case 1:
         settings.autoTrayDone = !settings.autoTrayDone;
       case 2:
         settings.autoDblOpenWeb = !settings.autoDblOpenWeb;
       case 3:
-        settings.autoFullscreen = !settings.autoFullscreen;
+        settings.autoStart = !settings.autoStart;
       default:
-        return; // 动作行没有拨杆
-    }
+        return; // 登录码行/动作行没有拨杆
+      }
     _saveSettingsAndSyncAutostart();
   }
 
@@ -276,6 +281,89 @@ class AppState extends ChangeNotifier {
     stats = Stats.load();
     // 与 __main__.py 启动路径一致：面板亮出「待命」，不自动开网页。
     setStatus('st.ready', bottomKey: 'st.ready.bottom', warnFlag: false);
+    // 设置卡第一行的登录码：启动自动取一次（失败静默，副标题报状态）。
+    unawaited(refreshDisplayedCode());
+  }
+
+  // ════════════════ 设置卡行 0：登录码显示（取/复制）════════════════
+  String _displayCode = '';
+  DateTime? _displayCodeAt;
+  String _codeState = 'loading'; // loading|ok|copied|fail
+  bool _codeFetching = false;
+  Timer? _copiedTimer;
+
+  String _codeSubtitle() {
+    switch (_codeState) {
+      case 'ok':
+      case 'copied':
+        if (_displayCodeAt != null) {
+          return _codeState == 'copied'
+              ? t('row.code.copied')
+              : t('row.code.tap', [Lang.fmtTime(_displayCodeAt!, true)]);
+        }
+        return t('row.code.loading');
+      case 'fail':
+        return t('row.code.fail');
+      default:
+        return t('row.code.loading');
+    }
+  }
+
+  /// 点登录码行：有码 → 复制到剪贴板（副标题闪「已复制」）；无码/失败 → 重取。
+  void onCodeRowTapped() {
+    if (_codeState == 'ok' && _displayCode.isNotEmpty) {
+      copyToClipboard(_displayCode);
+      // 日志纪律（与本地取码服务一致）：绝不把码本身写进日志。
+      _log('登录码已复制到剪贴板（设置卡行 0）。');
+      _codeState = 'copied';
+      sync();
+      _copiedTimer?.cancel();
+      _copiedTimer = Timer(const Duration(seconds: 3), () {
+        if (_codeState == 'copied') {
+          _codeState = 'ok';
+          sync();
+        }
+      });
+      return;
+    }
+    unawaited(refreshDisplayedCode());
+  }
+
+  /// 取一次登录码给设置卡显示。失败不弹窗（副标题报「取码失败 · 点击重试」，
+  /// 详情在日志）。不 busy 面板 —— 这只是个展示行，别影响主流程观感。
+  Future<void> refreshDisplayedCode() async {
+    if (_codeFetching) return;
+    _codeFetching = true;
+    _codeState = 'loading';
+    sync();
+    try {
+      final hub = await _hubIpForCode();
+      final (code, _) = await fetchCode(hub, log: _log);
+      _displayCode = code;
+      _displayCodeAt = DateTime.now();
+      _codeState = 'ok';
+      _log('登录码已取到（设置卡显示用，未落盘）。');
+    } catch (e) {
+      _codeState = 'fail';
+      _log('× 设置卡取登录码失败：$e');
+    } finally {
+      _codeFetching = false;
+      sync();
+    }
+  }
+
+  /// 取码用的中枢 IP：手动指定（--hub / settings.HubIp，可带端口）优先，
+  /// 否则自动发现；发现落空问云端提示（fetchCode 对空 hub 也有 cfg did 兜底）。
+  Future<String> _hubIpForCode() async {
+    final manual = hubOverride.isNotEmpty ? hubOverride : settings.hubIp;
+    if (manual.isNotEmpty) {
+      final idx = manual.lastIndexOf(':');
+      return idx > 0 ? manual.substring(0, idx) : manual;
+    }
+    final (hubIp, _, _) = await discover();
+    if (hubIp.isNotEmpty) return hubIp;
+    final hints = await hubIpHints(log: _log);
+    return hints.isEmpty ? '' : hints.first;
   }
 
   void toggleLang() {
@@ -1050,6 +1138,8 @@ class AppState extends ChangeNotifier {
           warnFlag: false,
         );
         setInfo('info.relogin_ok');
+        // 凭据刚换新 → 设置卡的登录码显示也跟着取一次。
+        unawaited(refreshDisplayedCode());
       }
     } catch (e) {
       _log('× 重新登录：异常 $e');

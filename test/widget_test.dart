@@ -27,12 +27,13 @@ void main() {
     expect(ezHit(Geo.tbCx[2], Geo.tbCy), EzHit.close);
   });
 
-  test('命中表：5 行设置卡 = 4 拨杆 + 1 动作行（红方块本身）', () {
-    expect(ezHit(Geo.c3TxX + 10, Geo.c3RowCy(0)), EzHit.toggle0);
-    expect(ezHit(Geo.c3TxX + 10, Geo.c3RowCy(1)), EzHit.toggle1);
-    expect(ezHit(Geo.c3TxX + 10, Geo.c3RowCy(2)), EzHit.toggle2);
-    expect(ezHit(Geo.c3TxX + 10, Geo.c3RowCy(3)), EzHit.toggle3);
-    // 动作行：整行大部分点不中，红方块内才中。
+  test('命中表：5 行设置卡 = 码行 + 3 拨杆 + 1 动作行（红方块本身）', () {
+    // 行序（2026-10-19 二改）：0 登录码 1 收托盘 2 双击开网页 3 自启 4 重登。
+    expect(ezHit(Geo.c3TxX + 10, Geo.c3RowCy(0)), EzHit.codeRow);
+    expect(ezHit(Geo.c3TxX + 10, Geo.c3RowCy(1)), EzHit.toggleTray);
+    expect(ezHit(Geo.c3TxX + 10, Geo.c3RowCy(2)), EzHit.toggleDbl);
+    expect(ezHit(Geo.c3TxX + 10, Geo.c3RowCy(3)), EzHit.toggleStart);
+    // 动作行（行 4）：整行大部分点不中，红方块内才中。
     expect(ezHit(Geo.c3TxX + 10, Geo.c3RowCy(4)), EzHit.none);
     expect(ezHit(Geo.rowBtnX + 100, Geo.c3RowCy(4)), EzHit.relogin);
     // 空白区
