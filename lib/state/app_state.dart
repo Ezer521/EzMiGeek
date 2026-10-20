@@ -292,6 +292,11 @@ class AppState extends ChangeNotifier {
   bool _codeFetching = false;
   Timer? _copiedTimer;
 
+  /// 出图模式（--ui-png）用：登录码行是否已落定（取到/已复制/失败都算）。
+  /// 抓图要等它，不然截到的是「正在取码…」的中间态。
+  bool get codeSettled =>
+      _codeState == 'ok' || _codeState == 'copied' || _codeState == 'fail';
+
   String _codeSubtitle() {
     switch (_codeState) {
       case 'ok':

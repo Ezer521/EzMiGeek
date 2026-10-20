@@ -84,6 +84,14 @@ Future<void> main(List<String> args) async {
     state.sync();
   }
 
+  if (uiPng) {
+    // 出图展示态：两枚拨杆摆「开」只是渲染需要 —— 不落盘、不写注册表，
+    // 真机设置不受影响；登录码行由 grab() 等取码完成后自然亮出真码。
+    state.settings.autoTrayDone = true;
+    state.settings.autoStart = true;
+    state.sync();
+  }
+
   // ── 首次运行：免责声明确认（出图模式跳过）。用户点「取消」就退出。
   if (!uiPng && !File(disclaimerAck()).existsSync()) {
     final ok = confirmDisclaimer(legalAckText());
@@ -200,10 +208,14 @@ Future<void> main(List<String> args) async {
         exit(2);
       }
       try {
+        if (!state.codeSettled) throw StateError('登录码还没取到，再等一拍');
+        // 状态落定 ≠ 画面已更新：等当帧画完再抓，不然截到的还是旧帧。
+        await WidgetsBinding.instance.endOfFrame;
         final ctx = key.currentContext;
         if (ctx == null) throw StateError('boundary 尚未挂载');
         final boundary = ctx.findRenderObject()! as RenderRepaintBoundary;
-        final image = await boundary.toImage(pixelRatio: 1.0);
+        // 3× 密度栅格化：窗口被屏幕压小后按逻辑 1× 抓会糊，README 里缩放也要保清晰。
+        final image = await boundary.toImage(pixelRatio: 3.0);
         final data = await image.toByteData(format: ui.ImageByteFormat.png);
         if (data == null) throw StateError('PNG 编码返回空');
         File(outPath).writeAsBytesSync(data.buffer.asUint8List(), flush: true);
