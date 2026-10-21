@@ -60,7 +60,7 @@ class _EzShellState extends State<EzShell> {
       case EzHit.codeRefresh: s.onCodeRefreshTapped();
       case EzHit.toggleTray: s.toggleRow(1);
       case EzHit.toggleDbl: s.toggleRow(2);
-      case EzHit.toggleStart: s.toggleRow(4);
+      case EzHit.toggleStart: s.toggleRow(3);
       case EzHit.relogin: s.startRelogin();
       case EzHit.lang: s.toggleLang();
       case EzHit.min: windowMin();
