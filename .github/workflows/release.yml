@@ -168,6 +168,9 @@ jobs:
     if: needs.meta.outputs.should_publish == 'true'
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout (for CHANGELOG.md release notes)
+        uses: actions/checkout@v4
+
       - name: Download Windows artifacts
         uses: actions/download-artifact@v4
         with:
@@ -187,6 +190,40 @@ jobs:
           sha256sum EzMiGeek-*.zip EzMiGeek-script.user.js > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
+      - name: Build release notes from CHANGELOG.md
+        shell: bash
+        run: |
+          set -euo pipefail
+          VER="${{ needs.meta.outputs.version }}"
+          TAG="${{ needs.meta.outputs.tag }}"
+          SECTION=$(awk -v ver="$VER" '
+            $0 ~ "^## \\[" ver "\\]" { in_sec=1; next }
+            /^## \[/ && in_sec { exit }
+            in_sec { print }
+          ' CHANGELOG.md)
+          {
+            echo "## EzMiGeek ${TAG}"
+            echo ""
+            if [ -n "$SECTION" ]; then
+              echo "$SECTION"
+            else
+              echo "详见 [CHANGELOG.md](https://github.com/Ezer521/EzMiGeek/blob/main/CHANGELOG.md)。"
+            fi
+            echo ""
+            echo "---"
+            echo ""
+            echo "## 下载与首次运行说明"
+            echo ""
+            echo "- **Windows (x64)**：下载 \`EzMiGeek-win64-v${VER}.zip\` 解压后运行 \`EzMiGeek.exe\`（遇 SmartScreen 蓝屏请核对 \`SHA256SUMS.txt\` 后点「更多信息 → 仍要运行」）。"
+            echo "- **macOS (arm64 / macOS 12+)**：下载 \`EzMiGeek-macos-arm64-v${VER}.zip\` 解压后将 \`EzMiGeek.app\` 拖入「应用程序」。首次运行如提示未公证，请在终端执行一次："
+            echo '  ```bash'
+            echo '  xattr -cr /Applications/EzMiGeek.app'
+            echo '  ```'
+            echo "  macOS 15 首次扫描局域网中枢时，请在「本地网络」权限弹窗点「允许」。"
+            echo "- **篡改猴脚本**：点击安装 \`EzMiGeek-script.user.js\`（支持 Tampermonkey 自动更新）。"
+          } > release_notes.md
+          cat release_notes.md
+
       - name: Generate build provenance attestation
         uses: actions/attest-build-provenance@v2
         with:
@@ -199,7 +236,8 @@ jobs:
         with:
           tag_name: ${{ needs.meta.outputs.tag }}
           name: EzMiGeek ${{ needs.meta.outputs.tag }}
-          generate_release_notes: true
+          body_path: release_notes.md
+          generate_release_notes: false
           files: |
             release_files/EzMiGeek-win64-v*.zip
             release_files/EzMiGeek-macos-arm64-v*.zip
