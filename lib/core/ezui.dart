@@ -9,10 +9,11 @@ import 'dart:io' show Platform;
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
-import 'package:flutter/material.dart';
+import 'package:flutter/widgets.dart';
 
 // ============================================================ 调色板（Pal，逐值一致）
 abstract final class Pal {
+  static const Color white = Color(0xFFFFFFFF);
   static const Color ink = Color(0xFF020C32); // 主文字 近黑藏蓝 (2,12,50)
   static const Color ink2 = Color(0xFF243A5C); // 次级文字 (36,58,92)
   static const Color ink3 = Color(0xFF4E5D7A); // 说明 / 页脚 (78,93,122)
@@ -216,7 +217,7 @@ Path rrPath(Rect r, double rad) {
 /// G.Glass：白纱填充 + 顶部高光渐变（裁剪在圆角内）+ 白描边。
 void glass(Canvas c, Rect r, double rad, int fillA, int edgeA, double edgeW) {
   final p = rrPath(r, rad);
-  c.drawPath(p, Paint()..color = Colors.white.withValues(alpha: fillA / 255));
+  c.drawPath(p, Paint()..color = Pal.white.withValues(alpha: fillA / 255));
   c.save();
   c.clipPath(p);
   final hh = math.min(r.height * 0.45, 100.0);
@@ -225,13 +226,13 @@ void glass(Canvas c, Rect r, double rad, int fillA, int edgeA, double edgeW) {
     hi,
     Paint()
       ..shader = ui.Gradient.linear(hi.topCenter, hi.bottomCenter,
-          [Colors.white.withValues(alpha: 66 / 255), Colors.white.withValues(alpha: 0)]),
+          [Pal.white.withValues(alpha: 66 / 255), Pal.white.withValues(alpha: 0)]),
   );
   c.restore();
   c.drawPath(
       p,
       ezStroke
-        ..color = Colors.white.withValues(alpha: edgeA / 255)
+        ..color = Pal.white.withValues(alpha: edgeA / 255)
         ..strokeWidth = edgeW);
 }
 
@@ -418,8 +419,8 @@ void icoListDoc(Canvas c, Rect b, Color color, double w) {
 void icoInfo(Canvas c, Rect b, Color color) {
   final box = IBox(c, b, 100 * b.width / 100);
   box.oval(0, 0, 100, 100, box.brush(color));
-  box.oval(44.5, 20, 11, 11, box.brush(Colors.white));
-  box.rrect(44.5, 37, 11, 41, 5.5, box.brush(Colors.white));
+  box.oval(44.5, 20, 11, 11, box.brush(Pal.white));
+  box.rrect(44.5, 37, 11, 41, 5.5, box.brush(Pal.white));
   box.release();
 }
 

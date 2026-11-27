@@ -3,7 +3,7 @@ library;
 
 import 'dart:io' show Platform;
 
-import 'package:flutter/material.dart';
+import 'package:flutter/widgets.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'state/app_state.dart';
@@ -65,13 +65,18 @@ class _EzMiGeekAppState extends State<EzMiGeekApp> with WindowListener {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
+    return WidgetsApp(
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
+      color: const Color(0xFF1A7AF5),
+      textStyle: TextStyle(
         fontFamily: Platform.isWindows ? 'Microsoft YaHei UI' : 'PingFang SC',
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF1A7AF5)),
-        useMaterial3: true,
       ),
+      pageRouteBuilder: <T>(RouteSettings settings, WidgetBuilder builder) =>
+          PageRouteBuilder<T>(
+            settings: settings,
+            pageBuilder: (context, animation, secondaryAnimation) =>
+                builder(context),
+          ),
       builder: (context, child) {
         // 固定画布版式：屏蔽系统文字缩放，避免可访问性缩放破坏像素级对位。
         return MediaQuery.withClampedTextScaling(maxScaleFactor: 1.0, child: child!);

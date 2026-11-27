@@ -8,8 +8,8 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/gestures.dart' show kPrimaryButton;
-import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
+import 'package:flutter/widgets.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../core/ezui.dart';
@@ -231,15 +231,15 @@ class EzShellPainter extends CustomPainter {
   void _glassCover(Canvas c) {
     c.drawRect(
         Offset.zero & const Size(Geo.dw, Geo.dh),
-        Paint()..color = Colors.white.withValues(alpha: 88 / 255));
+        Paint()..color = Pal.white.withValues(alpha: 88 / 255));
   }
 
   void _shellEdge(Canvas c) {
     final p = rrPath(Offset.zero & const Size(Geo.dw, Geo.dh), Geo.sRad);
     c.drawPath(p,
-        ezStroke..color = Colors.white.withValues(alpha: 185 / 255)..strokeWidth = 2.4);
+        ezStroke..color = Pal.white.withValues(alpha: 185 / 255)..strokeWidth = 2.4);
     c.drawPath(p,
-        ezStroke..color = Colors.white.withValues(alpha: 64 / 255)..strokeWidth = 5.5);
+        ezStroke..color = Pal.white.withValues(alpha: 64 / 255)..strokeWidth = 5.5);
   }
 
   void _titleBar(Canvas c) {
@@ -413,7 +413,7 @@ class EzShellPainter extends CustomPainter {
     gLine(c, Geo.c1SepX, Geo.c1SepT, Geo.c1SepX, Geo.c1SepB,
         const Color(0xFFA8B8D0).withValues(alpha: 78 / 255), 2.0);
     gLine(c, Geo.c1SepX + 1.6, Geo.c1SepT, Geo.c1SepX + 1.6, Geo.c1SepB,
-        Colors.white.withValues(alpha: 150 / 255), 1.4);
+        Pal.white.withValues(alpha: 150 / 255), 1.4);
 
     ezTxt(c, state.ui.labL, EzFont.fLab(Pal.ink2), Geo.c1Lcx, Geo.c1LabCy, EzAlign.center);
     ezTxt(c, state.ui.labR, EzFont.fLab(Pal.ink2), Geo.c1Rcx, Geo.c1LabCy, EzAlign.center);
@@ -446,11 +446,11 @@ class EzShellPainter extends CustomPainter {
   void _btn(Canvas c, Rect r, bool primary, _IcoKind ik, String label, bool enabled, bool hov) {
     if (primary) {
       // 通宽按钮用纯竖直渐变（两端色 = 参考图按钮上下沿实测色）。
-      final ca = hov ? Pal.mix(Pal.btnTop, Colors.white, 0.16) : Pal.btnTop;
-      final cb = hov ? Pal.mix(Pal.btnBot, Colors.white, 0.16) : Pal.btnBot;
+      final ca = hov ? Pal.mix(Pal.btnTop, Pal.white, 0.16) : Pal.btnTop;
+      final cb = hov ? Pal.mix(Pal.btnBot, Pal.white, 0.16) : Pal.btnBot;
       vGrad(c, r, Geo.btnRad, ca, cb);
       c.drawPath(rrPath(r, Geo.btnRad),
-          ezStroke..color = Colors.white.withValues(alpha: 104 / 255)..strokeWidth = 1.8);
+          ezStroke..color = Pal.white.withValues(alpha: 104 / 255)..strokeWidth = 1.8);
     } else {
       glass(c, r, Geo.btnRad, hov ? Pal.aBtn2 + 34 : Pal.aBtn2, 175, 2);
     }
@@ -568,10 +568,10 @@ class EzShellPainter extends CustomPainter {
   void _rowAction(Canvas c, double cy, bool enabled, String label, bool hov) {
     final r = Rect.fromLTWH(
         Geo.rowBtnX, cy + 2 - Geo.rowBtnH / 2, Geo.rowBtnW, Geo.rowBtnH);
-    final base = Pal.mix(Pal.warn, Colors.white, enabled && hov ? 0.16 : 0.0);
+    final base = Pal.mix(Pal.warn, Pal.white, enabled && hov ? 0.16 : 0.0);
     fillRR(c, r, Geo.rowBtnRad, base);
     c.drawPath(rrPath(r, Geo.rowBtnRad),
-        ezStroke..color = Colors.white.withValues(alpha: 104 / 255)..strokeWidth = 1.8);
+        ezStroke..color = Pal.white.withValues(alpha: 104 / 255)..strokeWidth = 1.8);
 
     var fg = const Color(0xFFFCFFFF);
     if (!enabled) fg = fg.withValues(alpha: 150 / 255);
@@ -593,7 +593,7 @@ class EzShellPainter extends CustomPainter {
         Paint()
           ..color = (on ? Pal.iconBlue : Pal.togOff).withValues(alpha: 228 / 255));
     c.drawPath(p,
-        ezStroke..color = Colors.white.withValues(alpha: 80 / 255)..strokeWidth = 1.5);
+        ezStroke..color = Pal.white.withValues(alpha: 80 / 255)..strokeWidth = 1.5);
     // 与原版 Toggle 逐值一致：d = TogH−8；FillEllipse(kx, Y+4, d, d) 里 kx/Y+4
     // 是**左/上边缘**，drawCircle 要圆心 ⇒ x/y 各补 d/2（x 漏补 = 圆钮缩到轨道
     // 中间，EzMMB 实测摔过）。
@@ -606,7 +606,7 @@ class EzShellPainter extends CustomPainter {
     c.drawCircle(
         Offset(kx + d / 2, r.top + 4 + d / 2),
         d / 2,
-        Paint()..color = Colors.white.withValues(alpha: 252 / 255));
+        Paint()..color = Pal.white.withValues(alpha: 252 / 255));
   }
 
   void _footer(Canvas c) {

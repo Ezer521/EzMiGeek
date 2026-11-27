@@ -10,7 +10,6 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui show ImageByteFormat, PlatformDispatcher;
 
-import 'package:flutter/material.dart' show Colors;
 import 'package:flutter/rendering.dart' show RenderRepaintBoundary;
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter/widgets.dart';
@@ -145,7 +144,7 @@ Future<void> _boot(List<String> args) async {
         'EzMiGeek · ${Lang.zh ? '米家自动化极客版自动登录助手' : 'Mi Geek auto sign-in helper'}',
     titleBarStyle: TitleBarStyle.hidden,
     windowButtonVisibility: Platform.isWindows ? null : false,
-    backgroundColor: Colors.transparent,
+    backgroundColor: const Color(0x00000000),
   );
   await windowManager.waitUntilReadyToShow(windowOptions, () async {
     await windowManager.show();
