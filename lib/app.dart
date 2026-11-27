@@ -54,6 +54,16 @@ class _EzMiGeekAppState extends State<EzMiGeekApp> with WindowListener {
   }
 
   @override
+  void onWindowFocus() {
+    widget.state.setWindowFocused(true);
+  }
+
+  @override
+  void onWindowBlur() {
+    widget.state.setWindowFocused(false);
+  }
+
+  @override
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,

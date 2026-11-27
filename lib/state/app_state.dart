@@ -88,6 +88,15 @@ class AppState extends ChangeNotifier {
   bool _busy = false;
   bool get busy => _busy;
 
+  /// 主窗口是否处于聚焦态（macOS 红绿灯失焦时柔和灰化、获焦/悬停亮色）。
+  bool windowFocused = true;
+
+  void setWindowFocused(bool focused) {
+    if (windowFocused == focused) return;
+    windowFocused = focused;
+    notifyListeners();
+  }
+
   // 一轮生命周期
   Launched? currentLaunched;
   bool _roundRunning = false;

@@ -122,6 +122,13 @@ class _EzShellState extends State<EzShell> {
           behavior: HitTestBehavior.opaque,
           onTapUp: (d) =>
               _dispatchTap(ezHit(_toDesign(d.localPosition).dx, _toDesign(d.localPosition).dy)),
+          onDoubleTapDown: (d) {
+            // 双击标题栏空白处 = 复位到最佳贴合尺寸（符合桌面端习惯）。
+            final p = _toDesign(d.localPosition);
+            if (p.dy <= Geo.tbDragH && ezHit(p.dx, p.dy) == EzHit.none) {
+              windowMaxToggle();
+            }
+          },
           child: LayoutBuilder(builder: (context, cons) {
             _size = Size(cons.maxWidth, cons.maxHeight);
             return CustomPaint(
@@ -236,14 +243,102 @@ class EzShellPainter extends CustomPainter {
   }
 
   void _titleBar(Canvas c) {
-    const color = Pal.iconTb;
-    icoMin(c, Geo.tbCx[0], Geo.tbCy, 15, color, 2.2);
-    icoMax(c, Geo.tbCx[1], Geo.tbCy, 14, color, 2.2);
-    icoClose(c, Geo.tbCx[2], Geo.tbCy, 14, color, 2.2);
+    if (!useMacChrome) {
+      const color = Pal.iconTb;
+      icoMin(c, Geo.tbCx[0], Geo.tbCy, 15, color, 2.2);
+      icoMax(c, Geo.tbCx[1], Geo.tbCy, 14, color, 2.2);
+      icoClose(c, Geo.tbCx[2], Geo.tbCy, 14, color, 2.2);
+      return;
+    }
+    // macOS 原生红绿灯样式：左上 实心红/黄/绿，失焦柔和灰化，hover 任一颗时整组亮色并浮现符号。
+    const activeFills = [
+      (Color(0xFFFF5F57), Color(0xFFE0443E)), // close 红
+      (Color(0xFFFEBC2E), Color(0xFFDBA419)), // min 黄
+      (Color(0xFF28C840), Color(0xFF1B9E2B)), // max 绿
+    ];
+    const inactiveFill = (Color(0xFFC9D2DF), Color(0xFFAEB8C7));
+    final hovering = hover == EzHit.close ||
+        hover == EzHit.min ||
+        hover == EzHit.max;
+    final lit = state.windowFocused || hovering;
+    for (var i = 0; i < 3; i++) {
+      final cx = Geo.tbCxMac[i], cy = Geo.tbCy;
+      final (fill, rim) = lit ? activeFills[i] : inactiveFill;
+      c.drawCircle(Offset(cx, cy), Geo.tbR, Paint()..color = fill);
+      c.drawCircle(
+        Offset(cx, cy),
+        Geo.tbR - 0.8,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.2
+          ..color = rim,
+      );
+      if (hovering) _trafficSymbol(c, i, cx, cy);
+    }
+  }
+
+  /// macOS 红绿灯 hover 符号：× / – / ⤢（深色半透明，贴近原生视觉）。
+  void _trafficSymbol(Canvas c, int i, double cx, double cy) {
+    final p = Paint()
+      ..color = const Color(0x66000000)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.6
+      ..strokeCap = StrokeCap.round;
+    switch (i) {
+      case 0: // close：×
+        c.drawLine(Offset(cx - 5, cy - 5), Offset(cx + 5, cy + 5), p);
+        c.drawLine(Offset(cx - 5, cy + 5), Offset(cx + 5, cy - 5), p);
+      case 1: // min：–
+        c.drawLine(Offset(cx - 6.5, cy), Offset(cx + 6.5, cy), p);
+      case 2: // max/reset：⤢ 对角双箭头
+        c.drawLine(Offset(cx - 5, cy + 5), Offset(cx + 5, cy - 5), p);
+        c.drawLine(Offset(cx + 5, cy - 5), Offset(cx + 1.8, cy - 5), p);
+        c.drawLine(Offset(cx + 5, cy - 5), Offset(cx + 5, cy - 1.8), p);
+        c.drawLine(Offset(cx - 5, cy + 5), Offset(cx - 1.8, cy + 5), p);
+        c.drawLine(Offset(cx - 5, cy + 5), Offset(cx - 5, cy + 1.8), p);
+    }
   }
 
   void _header(Canvas c) {
     final img = EzLogo.image;
+    const brand = 'EzMiGeek'; // 品牌名，不进语言表（中英切换不变）
+    if (useMacChrome) {
+      // macOS 镜像头部：Logo + 标题右对齐到右上角，状态胶囊钉左沿向右生长（避开左上红绿灯）。
+      final logoRect = Rect.fromLTWH(Geo.logoRX, Geo.logoY, Geo.logoW, Geo.logoW);
+      if (img != null) {
+        c.drawImageRect(
+          img,
+          Rect.fromLTWH(0, 0, img.width.toDouble(), img.height.toDouble()),
+          logoRect,
+          Paint()..filterQuality = FilterQuality.high,
+        );
+      } else {
+        icoAppLogo(c, logoRect);
+      }
+      final brandW = ezTextWidth(brand, EzFont.fTtl(Pal.ink));
+      ezTxt(c, brand, EzFont.fTtl(Pal.ink), Geo.brandRight, Geo.titleCy, EzAlign.right);
+      final sigRight = Geo.brandRight - brandW - Geo.signGap;
+      ezTxt(c, 'by Ezer', EzFont.fSig(Pal.ink2), sigRight, Geo.signCy, EzAlign.right);
+      ezTxt(c, state.ui.headerSub, EzFont.fSub(Pal.ink2), Geo.subRight, Geo.subCy,
+          EzAlign.right);
+
+      final brandLeft = Geo.brandRight - brandW;
+      final sigLeft = sigRight - ezTextWidth('by Ezer', EzFont.fSig(Pal.ink2));
+      final subLeft =
+          Geo.subRight - ezTextWidth(state.ui.headerSub, EzFont.fSub(Pal.ink2));
+      final safeRight =
+          math.min(brandLeft, math.min(sigLeft, subLeft)) - Geo.pillSafeGap;
+      final pillStyle = EzFont.fPill(Pal.ink);
+      final text = _fit(state.ui.status, pillStyle, Geo.pillMaxTextWLeft(safeRight));
+      final (px, pw, dotCx, txX) =
+          Geo.pillGeomLeft(ezTextWidth(text, pillStyle), safeRight);
+      final pill = Rect.fromLTWH(px, Geo.pillCy - Geo.pillH / 2, pw, Geo.pillH);
+      glass(c, pill, Geo.pillH / 2, Pal.aPill, 170, 2);
+      c.drawCircle(Offset(dotCx, Geo.pillCy), Geo.pillDotD / 2, Paint()..color = _dotColor());
+      ezTxt(c, text, pillStyle, txX, Geo.pillCy + 1, EzAlign.left);
+      return;
+    }
+
     if (img != null) {
       c.drawImageRect(
         img,
@@ -253,7 +348,6 @@ class EzShellPainter extends CustomPainter {
     } else {
       icoAppLogo(c, Rect.fromLTWH(Geo.logoX, Geo.logoY, Geo.logoW, Geo.logoW));
     }
-    const brand = 'EzMiGeek'; // 品牌名，不进语言表（中英切换不变）
     ezTxt(c, brand, EzFont.fTtl(Pal.ink), Geo.titleX, Geo.titleCy, EzAlign.left);
     final sigX = Geo.titleX + ezTextWidth(brand, EzFont.fTtl(Pal.ink)) + Geo.signGap;
     ezTxt(c, 'by Ezer', EzFont.fSig(Pal.ink2), sigX, Geo.signCy, EzAlign.left);

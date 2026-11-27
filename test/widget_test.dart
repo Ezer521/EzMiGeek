@@ -22,9 +22,15 @@ void main() {
     expect(ezHit(Geo.btnX(1) + 10, Geo.btn2Y + 35), EzHit.doc);
     expect(ezHit(Geo.btnX(2) + 10, Geo.btn2Y + 35), EzHit.log);
     expect(ezHit(Geo.cr - 30, Geo.foot2Cy), EzHit.lang);
-    expect(ezHit(Geo.tbCx[0], Geo.tbCy), EzHit.min);
-    expect(ezHit(Geo.tbCx[1], Geo.tbCy), EzHit.max);
-    expect(ezHit(Geo.tbCx[2], Geo.tbCy), EzHit.close);
+    if (useMacChrome) {
+      expect(ezHit(Geo.tbCxMac[0], Geo.tbCy), EzHit.close);
+      expect(ezHit(Geo.tbCxMac[1], Geo.tbCy), EzHit.min);
+      expect(ezHit(Geo.tbCxMac[2], Geo.tbCy), EzHit.max);
+    } else {
+      expect(ezHit(Geo.tbCx[0], Geo.tbCy), EzHit.min);
+      expect(ezHit(Geo.tbCx[1], Geo.tbCy), EzHit.max);
+      expect(ezHit(Geo.tbCx[2], Geo.tbCy), EzHit.close);
+    }
   });
 
   test('命中表：5 行设置卡 = 码行 + 3 拨杆 + 1 动作行（红方块本身）', () {

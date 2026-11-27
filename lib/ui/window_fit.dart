@@ -72,9 +72,12 @@ Future<String> applyWindowFit() async {
       math.min(target.width, designW * 0.35),
       math.min(target.height, designH * 0.35),
     );
+    // 先解除旧限幅再设尺寸，避免外接屏/切分辨率后点绿灯复位被旧 min/max 钳住。
+    await windowManager.setMinimumSize(Size.zero);
+    await windowManager.setMaximumSize(const Size(10000, 10000));
+    await windowManager.setSize(target);
     await windowManager.setMinimumSize(minSize);
     await windowManager.setMaximumSize(target);
-    await windowManager.setSize(target);
     try {
       await windowManager.setAspectRatio(designW / designH);
     } catch (_) {}

@@ -41,6 +41,10 @@ abstract final class Pal {
       ((a.b + (b.b - a.b) * t) * 255).round());
 }
 
+/// 是否采用 macOS 外壳排布（左上红绿灯 + 头部右对齐镜像 + 左沿状态胶囊）。
+/// 默认仅在 macOS 启用，Windows 100% 保持原右上三钮布局；导出可变供单元测试双态覆盖。
+bool useMacChrome = Platform.isMacOS;
+
 // ============================================================ 几何网格（Geo，逐值一致）
 abstract final class Geo {
   static const double dw = 1043; // 外壳宽（设计单位）
@@ -53,13 +57,18 @@ abstract final class Geo {
   // ---- 标题栏
   static const double tbCy = 29;
   static const double tbDragH = 58;
-  static const List<double> tbCx = [849.5, 926.5, 1003];
+  static const List<double> tbCx = [849.5, 926.5, 1003]; // Windows：右上 最小化/复位/关闭
+  static const List<double> tbCxMac = [36, 83, 130]; // macOS：左上 关闭(红)/最小化(黄)/复位(绿)
+  static const double tbR = 14; // macOS 红绿灯半径（设计单位）
 
-  // ---- 头部
+  // ---- 头部（Windows 左对齐；macOS 镜像到右上右对齐，避开左上红绿灯）
   static const double logoX = 41, logoY = 54, logoW = 112;
   static const double titleX = 183, titleCy = 93;
   static const double signGap = 15, signCy = 102.4;
   static const double subX = 185, subCy = 151;
+  static const double logoRX = 890; // macOS 镜像 logo 左沿 = dw - logoX - logoW
+  static const double brandRight = 860; // macOS 镜像品牌右沿 = dw - titleX
+  static const double subRight = 858; // macOS 镜像副标题右沿 = dw - subX
 
   // ---- 状态胶囊（2026-09-25 起按文案自动变宽）
   static const double pillW = 189, pillH = 64, pillCy = 118;
@@ -68,12 +77,12 @@ abstract final class Geo {
   // ＋ 文字 ＋ 右内边距 27.5 ⇒ 文字只有 83.5 的位子。文字没超 83.5 就
   // 一个像素都不动；超了就往左长（右沿钉死 CR），左右内边距永远相等。
   static const double pillPad = 27.5, pillGap = 23.5, pillHeadW = 78;
-  static const double pillSafeGap = 20; // 胶囊左沿与头部文字之间的最小间隙
+  static const double pillSafeGap = 20; // 胶囊与头部文字之间的最小间隙
 
   static double get pillX => cr - pillW;
   static double get pillTextW => pillW - pillHeadW - pillPad; // 83.5
 
-  /// 胶囊几何，返回 (x, w, dot_cx, tx_x)。
+  /// 胶囊几何（Windows 钉右版），返回 (x, w, dot_cx, tx_x)。
   /// 文字比设计宽度宽多少，胶囊就往左长多少；左沿不许越过 `safeLeft`。
   static (double, double, double, double) pillGeom(double textW, double? safeLeft) {
     var w = pillW + math.max(0.0, textW - pillTextW);
@@ -86,6 +95,20 @@ abstract final class Geo {
 
   /// 左沿被 `safeLeft` 钳住之后，文字最多还能有多宽（超出必须截断）。
   static double pillMaxTextW(double safeLeft) => (cr - safeLeft) - pillHeadW - pillPad;
+
+  /// 胶囊几何（macOS 钉左版），返回 (x, w, dot_cx, tx_x)。
+  /// 文字比设计宽度宽多少，胶囊就向右长多少；右沿不许越过 `safeRight`。
+  static (double, double, double, double) pillGeomLeft(double textW, double? safeRight) {
+    var w = pillW + math.max(0.0, textW - pillTextW);
+    if (safeRight != null) {
+      w = math.min(w, math.max(pillW, safeRight - cl));
+    }
+    return (cl, w, cl + pillPad + pillDotD / 2, cl + pillHeadW + pillPad);
+  }
+
+  /// macOS 钉左版：右沿被 `safeRight` 钳住之后，文字最多还能有多宽（超出必须截断）。
+  static double pillMaxTextWLeft(double safeRight) =>
+      (safeRight - cl) - pillHeadW - pillPad;
 
   // ---- 卡片1（状态卡）
   static const double c1y = 198, c1h = 317;
@@ -528,8 +551,16 @@ const List<EzHit?> kRowToggles = [
 ];
 
 EzHit ezHit(double x, double y) {
-  // 标题栏三钮（口径比字形大一圈，好点）。
-  if (y >= Geo.tbCy - 26 && y <= Geo.tbCy + 26) {
+  // 标题栏三钮：macOS 为左上红/黄/绿密排（±23 不重叠）；Windows 为右上三钮（±26）。
+  if (useMacChrome) {
+    if (y >= Geo.tbCy - 24 && y <= Geo.tbCy + 24) {
+      for (var i = 0; i < 3; i++) {
+        if ((x - Geo.tbCxMac[i]).abs() <= 23) {
+          return i == 0 ? EzHit.close : (i == 1 ? EzHit.min : EzHit.max);
+        }
+      }
+    }
+  } else if (y >= Geo.tbCy - 26 && y <= Geo.tbCy + 26) {
     for (var i = 0; i < 3; i++) {
       if ((x - Geo.tbCx[i]).abs() <= 26) {
         return i == 0 ? EzHit.min : (i == 1 ? EzHit.max : EzHit.close);

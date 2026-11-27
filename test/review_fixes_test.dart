@@ -11,6 +11,8 @@ import 'dart:typed_data';
 
 import 'package:ezmigeek_flutter/browser/browser_ctl.dart'
     show isChromiumExe;
+import 'package:ezmigeek_flutter/core/ezui.dart'
+    show EzHit, Geo, ezHit, useMacChrome;
 import 'package:ezmigeek_flutter/core/i18n.dart';
 import 'package:ezmigeek_flutter/mijia/hub_discovery.dart'
     show isPrivateIpv4, parseMacRouteGateway, verifyHubDetail;
@@ -350,6 +352,33 @@ destination: default
       final enFirst = buildOnboardTransitionScript(zh: false, isRelogin: false);
       expect(enFirst, contains('Mi Account Signed In'));
       expect(enFirst, contains('Keep this browser window open'));
+    });
+
+    test('双平台标题栏命中与 macOS 左沿胶囊几何互不串扰', () {
+      final saved = useMacChrome;
+      try {
+        useMacChrome = true;
+        expect(ezHit(Geo.tbCxMac[0], Geo.tbCy), EzHit.close);
+        expect(ezHit(Geo.tbCxMac[1], Geo.tbCy), EzHit.min);
+        expect(ezHit(Geo.tbCxMac[2], Geo.tbCy), EzHit.max);
+        // Windows 右上坐标在 macOS 排布下不应误命中
+        expect(ezHit(Geo.tbCx[2], Geo.tbCy), EzHit.none);
+
+        final (px, pw, dotCx, txX) = Geo.pillGeomLeft(260, 500);
+        expect(px, Geo.cl);
+        expect(px + pw, lessThanOrEqualTo(500));
+        expect(dotCx, greaterThan(px));
+        expect(txX, greaterThan(dotCx));
+
+        useMacChrome = false;
+        expect(ezHit(Geo.tbCx[0], Geo.tbCy), EzHit.min);
+        expect(ezHit(Geo.tbCx[1], Geo.tbCy), EzHit.max);
+        expect(ezHit(Geo.tbCx[2], Geo.tbCy), EzHit.close);
+        // macOS 左上坐标在 Windows 排布下不应误命中
+        expect(ezHit(Geo.tbCxMac[0], Geo.tbCy), EzHit.none);
+      } finally {
+        useMacChrome = saved;
+      }
     });
 
     test('RFC1918 私网判定：精准识别 172.16-31，不误扫公网 172 段', () {
