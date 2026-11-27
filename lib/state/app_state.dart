@@ -808,6 +808,22 @@ class AppState extends ChangeNotifier {
           launched,
           log: _log,
           onInfo: setInfo,
+          onWaitingLogin: () {
+            _info = StatusDesc('st.onboard_wait.info');
+            setStatus(
+              'st.onboard_wait',
+              bottomKey: 'st.onboard_wait.bottom',
+              busyFlag: true,
+            );
+          },
+          onSignedIn: () {
+            _info = StatusDesc('st.onboard_nav.info');
+            setStatus(
+              'st.onboard_nav',
+              bottomKey: 'st.onboard_nav.bottom',
+              busyFlag: true,
+            );
+          },
           isQuitting: () => _quitting,
         );
         if (res == null) {
@@ -1226,6 +1242,7 @@ class AppState extends ChangeNotifier {
         launched,
         log: _log,
         onInfo: setInfo,
+        isRelogin: true,
         isQuitting: () => _quitting,
       );
       if (res == null) {

@@ -32,7 +32,10 @@ import 'package:ezmigeek_flutter/services/autostart.dart'
 import 'package:ezmigeek_flutter/services/dpapi.dart'
     show decodeMacKeychainSecret, encodeMacKeychainSecret;
 import 'package:ezmigeek_flutter/services/onboard_service.dart'
-    show extractXiaomiCredsFromCookies, isXiaomiCookieDomain;
+    show
+        buildOnboardTransitionScript,
+        extractXiaomiCredsFromCookies,
+        isXiaomiCookieDomain;
 import 'package:ezmigeek_flutter/services/update_checker.dart'
     show isNewerVersion;
 import 'package:ezmigeek_flutter/services/win_cert.dart'
@@ -333,6 +336,20 @@ destination: default
       expect(got['passToken'], 'pt_ok');
       expect(got['cUserId'], 'cuid_ok');
       expect(got['deviceId'], 'dev_ok');
+    });
+
+    test('首次/重新登录过渡引导页脚本：替换空白 ok 页并覆盖中英文两态', () {
+      final zhFirst = buildOnboardTransitionScript(zh: true, isRelogin: false);
+      expect(zhFirst, contains('小米账号登录成功'));
+      expect(zhFirst, contains('不要关闭'));
+
+      final zhRelogin = buildOnboardTransitionScript(zh: true, isRelogin: true);
+      expect(zhRelogin, contains('重新登录成功'));
+      expect(zhRelogin, contains('即将自动关闭'));
+
+      final enFirst = buildOnboardTransitionScript(zh: false, isRelogin: false);
+      expect(enFirst, contains('Mi Account Signed In'));
+      expect(enFirst, contains('Keep this browser window open'));
     });
 
     test('RFC1918 私网判定：精准识别 172.16-31，不误扫公网 172 段', () {
