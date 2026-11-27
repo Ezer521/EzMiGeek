@@ -1,317 +1,170 @@
-// win32.dart —— Win32 API 的 dart:ffi 子集绑定（只收本程序用到的）。
+// win32.dart —— Win32 API 的最小化 dart:ffi 绑定（仅保留本程序实际调用）。
 //
-// 用法约定（与 C# 版 HookEngine 的铁律一致）：
-//   · 所有会从原生回调进入 Dart 的入口（钩子 / WndProc）都必须 try/catch 密不透风，
-//     异常绝不能逃出回调 —— 否则就是 0xC000041D 级别的进程终结。
-//   · 回调用的 NativeCallable 一律存字段保活，防 GC。
-//   · 句柄（HHOOK / HANDLE / HWND / HMODULE）在 x64 上与指针同宽，
-//     声明为 IntPtr（Dart 侧即 int）；其余定宽值参数保持原生拼写（Int32/Uint32…，
-//     调用点直接传 int 字面量）。
+// 安全原则：
+//   · 绝不引入键盘/鼠标全局钩子（SetWindowsHookEx）或按键注入（SendInput），
+//     避免杀毒软件静态/启发式误报；
+//   · 窗口回调（WndProc / EnumWindows）必须完整 try/catch，异常绝不可逃逸到原生层；
+//   · 句柄在 x64 上声明为 IntPtr，NativeCallable 必须存字段保活或同步调用后立即 close。
 library;
 
 import 'dart:ffi';
+import 'dart:io';
+
 import 'package:ffi/ffi.dart';
 
-// ── 结构体 ──────────────────────────────────────────────────────────────
+// ── 结构体与回调签名 ──────────────────────────────────────────────────────
 
-/// KBDLLHOOKSTRUCT / MSLLHOOKSTRUCT（布局相同，只有前两个字段含义不同）。
-final class KbdllHookStruct extends Struct {
-  @Uint32()
-  external int vkCode; // MSLLHOOKSTRUCT 里是 pt.x/pt.y，本程序不读鼠标坐标
-  @Uint32()
-  external int scanCode; // MSLLHOOKSTRUCT 里是 mouseData
-  @Uint32()
-  external int flags;
-  @Uint32()
-  external int time;
-  @IntPtr()
-  external int dwExtraInfo;
-}
-
-/// INPUT —— 原生是「DWORD type + 偏移 8 的联合体」，x64 总长 40 字节。
-/// Dart FFI 的 Union 所有字段共享偏移 0，表达不出这个布局；显式按字节偏移
-/// 声明（键盘成员落在 8..31，尾部补白撑到 40）。cbSize 必须恰为 40，
-/// 否则 SendInput 整批拒收 —— 这正是 C# 版 v4.0.0 首发的失效根因。
-final class Input extends Struct {
-  @Uint32()
-  external int type; // offset 0
-  @Uint32()
-  external int pad0; // offset 4（对齐填充）
-  @Uint16()
-  external int wVk; // offset 8  ┐
-  @Uint16()
-  external int wScan; // offset 10 │ KBDINPUT
-  @Uint32()
-  external int dwFlags; // offset 12 │（键盘路径只写这段）
-  @Uint32()
-  external int time; // offset 16 │
-  @IntPtr()
-  external int dwExtraInfo; // offset 24 ┘
-  @Array(8)
-  external Array<Uint8> pad1; // offset 32..39（联合体尾巴，撑到 40）
-}
-
-final class WndClassW extends Struct {
-  @Uint32()
-  external int style;
-  @IntPtr()
-  external int lpfnWndProc;
+final class RectL extends Struct {
   @Int32()
-  external int cbClsExtra;
+  external int left;
   @Int32()
-  external int cbWndExtra;
-  @IntPtr()
-  external int hInstance;
-  @IntPtr()
-  external int hIcon;
-  @IntPtr()
-  external int hCursor;
-  @IntPtr()
-  external int hbrBackground;
-  @IntPtr()
-  external int lpszMenuName;
-  @IntPtr()
-  external int lpszClassName;
+  external int top;
+  @Int32()
+  external int right;
+  @Int32()
+  external int bottom;
 }
 
-// ── 回调签名（原生拼写；Dart 回调实现可用 int 承接每个参数）──────────────
+typedef WndProcNative = IntPtr Function(
+  IntPtr hwnd,
+  Uint32 msg,
+  IntPtr wParam,
+  IntPtr lParam,
+);
+typedef EnumWindowsProcNative = Int32 Function(IntPtr hwnd, IntPtr lparam);
 
-typedef HookProcNative = IntPtr Function(Int32 nCode, IntPtr wParam, IntPtr lParam);
-typedef WndProcNative = IntPtr Function(IntPtr hwnd, Uint32 msg, IntPtr wParam, IntPtr lParam);
-
-// ── kernel32 ────────────────────────────────────────────────────────────
+// ── kernel32（惰性初始化，macOS 上不触碰）───────────────────────────────────
 
 final DynamicLibrary _kernel32 = DynamicLibrary.open('kernel32.dll');
 
-/// HMODULE GetModuleHandleW(LPCWSTR)
-final int Function(Pointer<Utf16>) getModuleHandleW = _kernel32
-    .lookupFunction<IntPtr Function(Pointer<Utf16>), int Function(Pointer<Utf16>)>(
-        'GetModuleHandleW');
+final int Function() getCurrentProcessId = _kernel32
+    .lookupFunction<Uint32 Function(), int Function()>('GetCurrentProcessId');
 
-/// DWORD GetCurrentThreadId()
-final int Function() getCurrentThreadId =
-    _kernel32.lookupFunction<Uint32 Function(), int Function()>('GetCurrentThreadId');
+final int Function(int, int, int) _openProcess = _kernel32.lookupFunction<
+    IntPtr Function(Uint32, Int32, Uint32),
+    int Function(int, int, int)>('OpenProcess');
 
-/// HANDLE CreateMutexW(LPSECURITY_ATTRIBUTES, BOOL, LPCWSTR)
-/// HANDLE OpenMutexW(DWORD, BOOL, LPCWSTR) —— 探测已有互斥体（不依赖 lastError）。
-final int Function(int, int, Pointer<Utf16>) openMutexW = _kernel32
-    .lookupFunction<IntPtr Function(IntPtr, IntPtr, Pointer<Utf16>),
-        int Function(int, int, Pointer<Utf16>)>('OpenMutexW');
+final int Function(int) _closeHandle = _kernel32
+    .lookupFunction<Int32 Function(IntPtr), int Function(int)>('CloseHandle');
 
-final int Function(Pointer<Utf16>, int, Pointer<Utf16>) createMutexW = _kernel32
-    .lookupFunction<IntPtr Function(Pointer<Utf16>, IntPtr, Pointer<Utf16>),
-        int Function(Pointer<Utf16>, int, Pointer<Utf16>)>('CreateMutexW');
+final int Function(int, int, Pointer<Uint16>, Pointer<Uint32>)
+    _queryFullProcessImageNameW = _kernel32.lookupFunction<
+        Int32 Function(IntPtr, Uint32, Pointer<Uint16>, Pointer<Uint32>),
+        int Function(int, int, Pointer<Uint16>, Pointer<Uint32>)>(
+  'QueryFullProcessImageNameW',
+);
 
-/// HANDLE CreateEventW(LPSECURITY_ATTRIBUTES, BOOL, BOOL, LPCWSTR)
-final int Function(int, int, int, Pointer<Utf16>) createEventW = _kernel32
-    .lookupFunction<IntPtr Function(IntPtr, IntPtr, IntPtr, Pointer<Utf16>),
-        int Function(int, int, int, Pointer<Utf16>)>('CreateEventW');
+const int _processQueryLimitedInformation = 0x1000;
 
-/// DWORD WaitForSingleObject(HANDLE, DWORD)
-final int Function(int, int) waitForSingleObject = _kernel32
-    .lookupFunction<Uint32 Function(IntPtr, IntPtr), int Function(int, int)>('WaitForSingleObject');
+/// 按 PID 查询进程完整映像路径，查询失败或进程已退出返回空串。
+String queryProcessImagePath(int pid) {
+  if (!Platform.isWindows) return '';
+  final h = _openProcess(_processQueryLimitedInformation, 0, pid);
+  if (h == 0) return '';
+  final buf = malloc<Uint16>(1024);
+  final size = malloc<Uint32>();
+  try {
+    size.value = 1024;
+    if (_queryFullProcessImageNameW(h, 0, buf, size) == 0) return '';
+    return buf.cast<Utf16>().toDartString();
+  } catch (_) {
+    return '';
+  } finally {
+    malloc
+      ..free(buf)
+      ..free(size);
+    _closeHandle(h);
+  }
+}
 
-final int Function(int) releaseMutex =
-    _kernel32.lookupFunction<Int32 Function(IntPtr), int Function(int)>('ReleaseMutex');
-
-final int Function(int) closeHandle =
-    _kernel32.lookupFunction<Int32 Function(IntPtr), int Function(int)>('CloseHandle');
-
-final int Function(int) setEvent =
-    _kernel32.lookupFunction<Int32 Function(IntPtr), int Function(int)>('SetEvent');
-
-final int Function(int) resetEvent =
-    _kernel32.lookupFunction<Int32 Function(IntPtr), int Function(int)>('ResetEvent');
-
-final int Function() getLastError =
-    _kernel32.lookupFunction<Uint32 Function(), int Function()>('GetLastError');
-
-/// 常量。
-const int errorAlreadyExists = 183;
-const int waitObject0 = 0;
-const int waitAbandoned = 0x80;
-const int mutexModifyState = 0x00100000; // SYNCHRONIZE
-
-// ── user32 ──────────────────────────────────────────────────────────────
+// ── user32（惰性初始化，macOS 上不触碰）─────────────────────────────────────
 
 final DynamicLibrary _user32 = DynamicLibrary.open('user32.dll');
 
-const int whMouseLl = 14, whKeyboardLl = 13;
-const int wmMButtonDown = 0x0207, wmMButtonUp = 0x0208;
-const int wmKeyDown = 0x0100, wmKeyUp = 0x0101;
-const int wmSysKeyDown = 0x0104, wmSysKeyUp = 0x0105;
-const int wmHotkey = 0x0312;
-const int llkhfInjected = 0x10; // LLKHF_INJECTED == LLMHF_INJECTED == 0x10
-const int inputKeyboard = 1;
-const int keyeventfExtendedkey = 1, keyeventfKeyup = 2;
-const int mapvkVkToVscEx = 4;
-const int hwndMessage = -3; // CreateWindowExW 的 parent：message-only 窗口
-
-// ── 闪光面板用：SW_SHOWNA 亮起不抢焦点；TOPMOST 置顶 ──
-const int swShowNA = 8;
-const int swHide = 0;
-const int hwndTopmost = -1;
-const int hwndNotopmost = -2;
-const int swpNoSize = 0x0001;
-const int swpNoMove = 0x0002;
-const int swpNoActivate = 0x0010;
-
-/// BOOL ShowWindow(HWND, int)
-final int Function(int, int) showWindowNative =
-    _user32.lookupFunction<Int32 Function(IntPtr, Int32), int Function(int, int)>('ShowWindow');
-
-/// BOOL SetWindowPos(HWND, HWND, int, int, int, int, UINT)
-final int Function(int, int, int, int, int, int, int) setWindowPos = _user32.lookupFunction<
-    Int32 Function(IntPtr, IntPtr, Int32, Int32, Int32, Int32, Uint32),
-    int Function(int, int, int, int, int, int, int)>('SetWindowPos');
-
-// ── 拖窗用（系统原生拖动通道，hide/收回时系统自动释放捕获，不会卡鼠标）──
 const int wmNcLButtonDown = 0x00A1;
 const int htCaption = 2;
+const int gwlWndProc = -4;
 
-/// BOOL ReleaseCapture()
-final int Function() releaseCapture =
-    _user32.lookupFunction<Int32 Function(), int Function()>('ReleaseCapture');
+final int Function() releaseCapture = _user32
+    .lookupFunction<Int32 Function(), int Function()>('ReleaseCapture');
 
-/// LRESULT SendMessageW(HWND, UINT, WPARAM, LPARAM)
-final int Function(int, int, int, int) sendMessageW = _user32
-    .lookupFunction<IntPtr Function(IntPtr, Uint32, IntPtr, IntPtr),
-        int Function(int, int, int, int)>('SendMessageW');
+final int Function(int, int, int, int) sendMessageW = _user32.lookupFunction<
+    IntPtr Function(IntPtr, Uint32, IntPtr, IntPtr),
+    int Function(int, int, int, int)>('SendMessageW');
 
-/// void MessageBeep(UINT uType) —— 系统事件音（不依赖窗口，最可靠的提示）。
-final void Function(int) messageBeep =
-    _user32.lookupFunction<Void Function(IntPtr), void Function(int)>('MessageBeep');
+final int Function(int, int, int, int) postMessageW = _user32.lookupFunction<
+    Int32 Function(IntPtr, Uint32, IntPtr, IntPtr),
+    int Function(int, int, int, int)>('PostMessageW');
 
-/// HWND FindWindowW(LPCWSTR, LPCWSTR)
-final int Function(Pointer<Utf16>, Pointer<Utf16>) findWindowW = _user32
-    .lookupFunction<IntPtr Function(Pointer<Utf16>, Pointer<Utf16>),
-        int Function(Pointer<Utf16>, Pointer<Utf16>)>('FindWindowW');
+final int Function(Pointer<Utf16>) _registerWindowMessageW = _user32
+    .lookupFunction<Uint32 Function(Pointer<Utf16>),
+        int Function(Pointer<Utf16>)>('RegisterWindowMessageW');
 
-/// 按类名找窗口句柄。
-int findWindowByClass(String className) {
-  final n = className.toNativeUtf16();
-  try {
-    return findWindowW(n, nullptr);
-  } finally {
-    malloc.free(n);
-  }
-}
+final int Function(int) _allowSetForegroundWindow = _user32
+    .lookupFunction<Int32 Function(Uint32), int Function(int)>(
+        'AllowSetForegroundWindow');
 
-/// HHOOK SetWindowsHookExW(int, HOOKPROC, HINSTANCE, DWORD)
-final int Function(int, Pointer<NativeFunction<HookProcNative>>, int, int)
-    setWindowsHookExW = _user32.lookupFunction<
-      IntPtr Function(IntPtr, Pointer<NativeFunction<HookProcNative>>, IntPtr, IntPtr),
-      int Function(int, Pointer<NativeFunction<HookProcNative>>, int, int)
-    >('SetWindowsHookExW');
-
-final int Function(int) unhookWindowsHookEx = _user32
-    .lookupFunction<Int32 Function(IntPtr), int Function(int)>('UnhookWindowsHookEx');
-
-final int Function(int, int, int, int) callNextHookEx = _user32
-    .lookupFunction<IntPtr Function(IntPtr, IntPtr, IntPtr, IntPtr),
-        int Function(int, int, int, int)>('CallNextHookEx');
-
-final int Function(int, Pointer<Input>, int) sendInput = _user32
-    .lookupFunction<Uint32 Function(IntPtr, Pointer<Input>, IntPtr),
-        int Function(int, Pointer<Input>, int)>('SendInput');
-
-final int Function(int, int) mapVirtualKeyW = _user32
-    .lookupFunction<Uint32 Function(IntPtr, IntPtr), int Function(int, int)>('MapVirtualKeyW');
-
-final int Function(int) getAsyncKeyState =
-    _user32.lookupFunction<Int16 Function(IntPtr), int Function(int)>('GetAsyncKeyState');
-
-final int Function(Pointer<WndClassW>) registerClassW = _user32
-    .lookupFunction<Uint16 Function(Pointer<WndClassW>), int Function(Pointer<WndClassW>)>(
-        'RegisterClassW');
-
-/// HWND CreateWindowExW(DWORD, LPCWSTR, LPCWSTR, DWORD, 4×int, 4×HANDLE)
-final int Function(int, Pointer<Utf16>, Pointer<Utf16>, int, int, int, int, int,
-        int, int, int, int) createWindowExW =
-    _user32.lookupFunction<
-      IntPtr Function(IntPtr, Pointer<Utf16>, Pointer<Utf16>, IntPtr, IntPtr, IntPtr, IntPtr,
-          IntPtr, IntPtr, IntPtr, IntPtr, IntPtr),
-      int Function(int, Pointer<Utf16>, Pointer<Utf16>, int, int, int, int, int,
-          int, int, int, int)
-    >('CreateWindowExW');
-
-final int Function(int, int, int, int) defWindowProcW = _user32
-    .lookupFunction<IntPtr Function(IntPtr, IntPtr, IntPtr, IntPtr),
-        int Function(int, int, int, int)>('DefWindowProcW');
-
-final int Function(int) destroyWindow =
-    _user32.lookupFunction<Int32 Function(IntPtr), int Function(int)>('DestroyWindow');
-
-final int Function(int, int, int, int) registerHotKey = _user32
-    .lookupFunction<Int32 Function(IntPtr, IntPtr, IntPtr, IntPtr),
-        int Function(int, int, int, int)>('RegisterHotKey');
-
-final int Function(int, int) unregisterHotKey = _user32
-    .lookupFunction<Int32 Function(IntPtr, IntPtr), int Function(int, int)>('UnregisterHotKey');
-
-final int Function(int, Pointer<Utf16>, Pointer<Utf16>, int) messageBoxW = _user32
-    .lookupFunction<Int32 Function(IntPtr, Pointer<Utf16>, Pointer<Utf16>, IntPtr),
-        int Function(int, Pointer<Utf16>, Pointer<Utf16>, int)>('MessageBoxW');
-
-// ── shell32 ─────────────────────────────────────────────────────────────
-
-final DynamicLibrary _shell32 = DynamicLibrary.open('shell32.dll');
-
-/// ShellExecuteW(0, 'open', path, 0, 0, SW_SHOWNORMAL) —— 用系统默认程序打开文件。
-final int Function(int, Pointer<Utf16>, Pointer<Utf16>, Pointer<Utf16>, Pointer<Utf16>, int)
-    shellExecuteW = _shell32.lookupFunction<
-      IntPtr Function(IntPtr, Pointer<Utf16>, Pointer<Utf16>, Pointer<Utf16>, Pointer<Utf16>, IntPtr),
-      int Function(int, Pointer<Utf16>, Pointer<Utf16>, Pointer<Utf16>, Pointer<Utf16>, int)
-    >('ShellExecuteW');
-
-/// 用系统默认程序打开一个本地文件（使用说明 / 日志）。
-/// 返回是否成功（>32 = 成功，ShellExecute 的老约定）。
-bool openFileWithDefaultApp(String path) {
-  final p = path.toNativeUtf16();
-  final verb = 'open'.toNativeUtf16();
-  try {
-    return shellExecuteW(0, verb, p, nullptr, nullptr, 1) > 32;
-  } catch (_) {
-    return false;
-  } finally {
-    malloc.free(p);
-    malloc.free(verb);
-  }
-}
-
-/// 原生 MessageBox（启动项设置失败这类必须让用户看见的提示）。
-void nativeMessageBox(String title, String text) {
-  final t = title.toNativeUtf16();
-  final m = text.toNativeUtf16();
-  try {
-    messageBoxW(0, m, t, 0x30 /*MB_ICONWARNING*/);
-  } catch (_) {} finally {
-    malloc.free(t);
-    malloc.free(m);
-  }
-}
-
-// ── 找本进程主窗（拖窗通道用）───────────────────────────────────────────
-
-/// DWORD GetWindowThreadProcessId(HWND, LPDWORD)
 final int Function(int, Pointer<Uint32>) getWindowThreadProcessId = _user32
     .lookupFunction<Uint32 Function(IntPtr, Pointer<Uint32>),
         int Function(int, Pointer<Uint32>)>('GetWindowThreadProcessId');
 
-/// DWORD GetCurrentProcessId()
-final int Function() getCurrentProcessId =
-    _kernel32.lookupFunction<Uint32 Function(), int Function()>('GetCurrentProcessId');
+final int Function(int, Pointer<RectL>) getWinRectB = _user32.lookupFunction<
+    Int32 Function(IntPtr, Pointer<RectL>),
+    int Function(int, Pointer<RectL>)>('GetWindowRect');
 
-/// HWND GetWindow(HWND, UINT) —— GW_HWNDNEXT = 2（Z 序下一个）
-const int gwHwndNext = 2;
+final int Function(int, Pointer<RectL>) getCliRectB = _user32.lookupFunction<
+    Int32 Function(IntPtr, Pointer<RectL>),
+    int Function(int, Pointer<RectL>)>('GetClientRect');
 
-final int Function(int, int) getWindow = _user32
-    .lookupFunction<IntPtr Function(IntPtr, Uint32), int Function(int, int)>('GetWindow');
+final int Function(int, Pointer<Uint16>, int) getClassNameW = _user32
+    .lookupFunction<Int32 Function(IntPtr, Pointer<Uint16>, Int32),
+        int Function(int, Pointer<Uint16>, int)>('GetClassNameW');
 
-/// 本进程的主窗句柄：EnumWindows 枚举 + 类名精确匹配 + 只认自己 PID。
-/// ★ 不用 FindWindowW：实测它对本进程的 'FLUTTER_RUNNER_WIN32_WINDOW' 会
-///   无解释地返回 0（EnumWindows+GetClassName 明明能看到；系统怪癖，
-///   2026-10-02 EzAway 实锤——四个 Flutter 版统一走此路径）。
+final int Function(int, int) getWindowLongPtrW = _user32
+    .lookupFunction<IntPtr Function(IntPtr, Int32), int Function(int, int)>(
+        'GetWindowLongPtrW');
+
+final int Function(int, int, int) setWindowLongPtrW = _user32.lookupFunction<
+    IntPtr Function(IntPtr, Int32, IntPtr),
+    int Function(int, int, int)>('SetWindowLongPtrW');
+
+final int Function(int, int, int, int, int) callWindowProcW = _user32
+    .lookupFunction<IntPtr Function(IntPtr, IntPtr, Uint32, IntPtr, IntPtr),
+        int Function(int, int, int, int, int)>('CallWindowProcW');
+
+final int Function(Pointer<NativeFunction<EnumWindowsProcNative>>, int)
+    enumWindows = _user32.lookupFunction<
+        Int32 Function(Pointer<NativeFunction<EnumWindowsProcNative>>, IntPtr),
+        int Function(Pointer<NativeFunction<EnumWindowsProcNative>>, int)>(
+  'EnumWindows',
+);
+
+/// 注册自定义跨进程窗口消息。
+int registerWindowMessage(String name) {
+  if (!Platform.isWindows) return 0;
+  final p = name.toNativeUtf16();
+  try {
+    return _registerWindowMessageW(p);
+  } finally {
+    malloc.free(p);
+  }
+}
+
+/// 单实例二次启动唤起消息 ID（仅 Windows 使用，惰性初始化）。
+final int wmEzMiGeekActivate = registerWindowMessage('EzMiGeek.Activate.v1');
+
+bool _classMatches(Pointer<Uint16> nameBuf, String className) {
+  for (var i = 0; i < className.length; i++) {
+    final a = nameBuf[i];
+    final b = className.codeUnitAt(i);
+    final la = (a >= 0x41 && a <= 0x5A) ? a + 0x20 : a;
+    final lb = (b >= 0x41 && b <= 0x5A) ? b + 0x20 : b;
+    if (la != lb) return false;
+  }
+  return nameBuf[className.length] == 0;
+}
+
+/// 本进程主窗句柄：EnumWindows 枚举 + 类名精确匹配 + 只认自己 PID。
 int findOwnWindowByClass(String className) {
   final me = getCurrentProcessId();
   final pidBuf = malloc<Uint32>();
@@ -328,18 +181,7 @@ int findOwnWindowByClass(String className) {
             nameBuf[i] = 0;
           }
           getClassNameW(h, nameBuf, 128);
-          var match = true;
-          for (var i = 0; i < className.length; i++) {
-            final a = nameBuf[i];
-            final b = className.codeUnitAt(i);
-            final la = (a >= 0x41 && a <= 0x5A) ? a + 0x20 : a;
-            final lb = (b >= 0x41 && b <= 0x5A) ? b + 0x20 : b;
-            if (la != lb) {
-              match = false;
-              break;
-            }
-          }
-          if (match && nameBuf[className.length] == 0) {
+          if (_classMatches(nameBuf, className)) {
             found.value = h;
             return 0;
           }
@@ -348,8 +190,11 @@ int findOwnWindowByClass(String className) {
       },
       exceptionalReturn: 1,
     );
-    enumWindows(cb.nativeFunction, 0);
-    cb.close();
+    try {
+      enumWindows(cb.nativeFunction, 0);
+    } finally {
+      cb.close();
+    }
     return found.value;
   } catch (_) {
     return 0;
@@ -361,57 +206,71 @@ int findOwnWindowByClass(String className) {
   }
 }
 
-// ──────────────────────────────────────── 窗口几何 / 过程子类化（窗口贴合 + 等比锁）
-
-final class RectL extends Struct {
-  @Int32()
-  external int left;
-  @Int32()
-  external int top;
-  @Int32()
-  external int right;
-  @Int32()
-  external int bottom;
+/// 通知已在运行的 EzMiGeek 实例把主面板弹到前台。
+/// Windows 走跨进程窗口消息；macOS 走 `open -a EzMiGeek` 触发 AppDelegate.applicationShouldHandleReopen。
+bool signalRunningInstance() {
+  if (!Platform.isWindows) {
+    try {
+      return Process.runSync('/usr/bin/open', ['-a', 'EzMiGeek']).exitCode == 0;
+    } catch (_) {
+      return false;
+    }
+  }
+  if (wmEzMiGeekActivate == 0) return false;
+  final me = getCurrentProcessId();
+  final selfPath = Platform.resolvedExecutable.toLowerCase();
+  final selfName = selfPath.replaceAll('\\', '/').split('/').last;
+  final pidBuf = malloc<Uint32>();
+  final nameBuf = malloc<Uint16>(128);
+  var targetHwnd = 0;
+  var targetPid = 0;
+  try {
+    final cb = NativeCallable<EnumWindowsProcNative>.isolateLocal(
+      (int h, int _) {
+        try {
+          getWindowThreadProcessId(h, pidBuf);
+          final pid = pidBuf.value;
+          if (pid == 0 || pid == me) return 1;
+          for (var i = 0; i < 128; i++) {
+            nameBuf[i] = 0;
+          }
+          getClassNameW(h, nameBuf, 128);
+          if (!_classMatches(nameBuf, 'FLUTTER_RUNNER_WIN32_WINDOW')) return 1;
+          final img = queryProcessImagePath(pid).toLowerCase();
+          if (img.isEmpty) return 1;
+          final imgName = img.replaceAll('\\', '/').split('/').last;
+          if (img == selfPath ||
+              imgName == selfName ||
+              imgName == 'ezmigeek.exe') {
+            targetHwnd = h;
+            targetPid = pid;
+            return 0;
+          }
+        } catch (_) {}
+        return 1;
+      },
+      exceptionalReturn: 1,
+    );
+    try {
+      enumWindows(cb.nativeFunction, 0);
+    } finally {
+      cb.close();
+    }
+    if (targetHwnd == 0) return false;
+    _allowSetForegroundWindow(targetPid);
+    return postMessageW(targetHwnd, wmEzMiGeekActivate, 0, 0) != 0;
+  } catch (_) {
+    return false;
+  } finally {
+    malloc
+      ..free(pidBuf)
+      ..free(nameBuf);
+  }
 }
-
-final int Function(int, Pointer<RectL>) getWinRectB = _user32
-    .lookupFunction<Int32 Function(IntPtr, Pointer<RectL>),
-        int Function(int, Pointer<RectL>)>('GetWindowRect');
-
-final int Function(int, Pointer<RectL>) getCliRectB = _user32
-    .lookupFunction<Int32 Function(IntPtr, Pointer<RectL>),
-        int Function(int, Pointer<RectL>)>('GetClientRect');
-
-final int Function(int, Pointer<Uint16>, int) getClassNameW = _user32
-    .lookupFunction<Int32 Function(IntPtr, Pointer<Uint16>, Int32),
-        int Function(int, Pointer<Uint16>, int)>('GetClassNameW');
-
-const int gwlWndProc = -4;
-const int wmSizing = 0x0214;
-const int wmEnterSizeMove = 0x0231;
-
-final int Function(int, int) getWindowLongPtrW = _user32
-    .lookupFunction<IntPtr Function(IntPtr, Int32), int Function(int, int)>(
-        'GetWindowLongPtrW');
-
-final int Function(int, int, int) setWindowLongPtrW = _user32
-    .lookupFunction<IntPtr Function(IntPtr, Int32, IntPtr),
-        int Function(int, int, int)>('SetWindowLongPtrW');
-
-final int Function(int, int, int, int, int) callWindowProcW = _user32
-    .lookupFunction<IntPtr Function(IntPtr, IntPtr, Uint32, IntPtr, IntPtr),
-        int Function(int, int, int, int, int)>('CallWindowProcW');
-
-typedef EnumWindowsProcNative = IntPtr Function(IntPtr, IntPtr);
-
-final int Function(Pointer<NativeFunction<EnumWindowsProcNative>>, int)
-    enumWindows = _user32.lookupFunction<
-        Int32 Function(Pointer<NativeFunction<EnumWindowsProcNative>>, IntPtr),
-        int Function(Pointer<NativeFunction<EnumWindowsProcNative>>, int)>(
-        'EnumWindows');
 
 /// 【窗口贴合】外框 vs 客户区实测。返回 '外框 WxH 客户 WxH'。
 String windowFitProbe(int hwnd) {
+  if (!Platform.isWindows) return '';
   final wr = malloc<RectL>(), cr = malloc<RectL>();
   try {
     getWinRectB(hwnd, wr);
@@ -425,5 +284,227 @@ String windowFitProbe(int hwnd) {
     malloc
       ..free(wr)
       ..free(cr);
+  }
+}
+
+// ── shell32 / 跨平台系统默认打开 ───────────────────────────────────────────
+
+final DynamicLibrary _shell32 = DynamicLibrary.open('shell32.dll');
+
+final int Function(int, Pointer<Utf16>, Pointer<Utf16>, Pointer<Utf16>,
+        Pointer<Utf16>, int) shellExecuteW =
+    _shell32.lookupFunction<
+        IntPtr Function(IntPtr, Pointer<Utf16>, Pointer<Utf16>, Pointer<Utf16>,
+            Pointer<Utf16>, Int32),
+        int Function(int, Pointer<Utf16>, Pointer<Utf16>, Pointer<Utf16>,
+            Pointer<Utf16>, int)>('ShellExecuteW');
+
+/// 用系统默认程序打开本地文件、目录或 URL（Windows 走 ShellExecuteW，macOS 走 open）。
+bool openFileWithDefaultApp(String pathOrUrl) {
+  if (!Platform.isWindows) {
+    try {
+      return Process.runSync('/usr/bin/open', [pathOrUrl]).exitCode == 0;
+    } catch (_) {
+      return false;
+    }
+  }
+  final p = pathOrUrl.toNativeUtf16();
+  final verb = 'open'.toNativeUtf16();
+  try {
+    return shellExecuteW(0, verb, p, nullptr, nullptr, 1) > 32;
+  } catch (_) {
+    return false;
+  } finally {
+    malloc
+      ..free(p)
+      ..free(verb);
+  }
+}
+
+// ── advapi32（原生注册表读写，惰性初始化）───────────────────────────────────
+
+final DynamicLibrary _advapi32 = DynamicLibrary.open('advapi32.dll');
+
+const int hkeyClassesRoot = -0x80000000;
+const int hkeyCurrentUser = -0x7FFFFFFF;
+const int hkeyLocalMachine = -0x7FFFFFFE;
+
+const int _keyRead = 0x20019;
+const int _keySetValue = 0x0002;
+const int _regSz = 1;
+const int _regExpandSz = 2;
+const int _errSuccess = 0;
+const int _errFileNotFound = 2;
+
+final int Function(int, Pointer<Utf16>, int, int, Pointer<IntPtr>)
+    _regOpenKeyExW = _advapi32.lookupFunction<
+        Int32 Function(IntPtr, Pointer<Utf16>, Uint32, Uint32, Pointer<IntPtr>),
+        int Function(int, Pointer<Utf16>, int, int, Pointer<IntPtr>)>(
+  'RegOpenKeyExW',
+);
+
+final int Function(int, Pointer<Utf16>, int, Pointer<Utf16>, int, int,
+        Pointer<Void>, Pointer<IntPtr>, Pointer<Uint32>) _regCreateKeyExW =
+    _advapi32.lookupFunction<
+        Int32 Function(IntPtr, Pointer<Utf16>, Uint32, Pointer<Utf16>, Uint32,
+            Uint32, Pointer<Void>, Pointer<IntPtr>, Pointer<Uint32>),
+        int Function(int, Pointer<Utf16>, int, Pointer<Utf16>, int, int,
+            Pointer<Void>, Pointer<IntPtr>, Pointer<Uint32>)>(
+  'RegCreateKeyExW',
+);
+
+final int Function(int, Pointer<Utf16>, Pointer<Uint32>, Pointer<Uint32>,
+        Pointer<Uint8>, Pointer<Uint32>) _regQueryValueExW =
+    _advapi32.lookupFunction<
+        Int32 Function(IntPtr, Pointer<Utf16>, Pointer<Uint32>, Pointer<Uint32>,
+            Pointer<Uint8>, Pointer<Uint32>),
+        int Function(int, Pointer<Utf16>, Pointer<Uint32>, Pointer<Uint32>,
+            Pointer<Uint8>, Pointer<Uint32>)>(
+  'RegQueryValueExW',
+);
+
+final int Function(int, Pointer<Utf16>, int, int, Pointer<Uint8>, int)
+    _regSetValueExW = _advapi32.lookupFunction<
+        Int32 Function(
+            IntPtr, Pointer<Utf16>, Uint32, Uint32, Pointer<Uint8>, Uint32),
+        int Function(int, Pointer<Utf16>, int, int, Pointer<Uint8>, int)>(
+  'RegSetValueExW',
+);
+
+final int Function(int, Pointer<Utf16>) _regDeleteValueW = _advapi32
+    .lookupFunction<Int32 Function(IntPtr, Pointer<Utf16>),
+        int Function(int, Pointer<Utf16>)>('RegDeleteValueW');
+
+final int Function(int) _regCloseKey = _advapi32
+    .lookupFunction<Int32 Function(IntPtr), int Function(int)>('RegCloseKey');
+
+/// 读取字符串注册表值（支持 REG_SZ / REG_EXPAND_SZ；valueName 传空串读默认值）。
+/// 返回 (value, errorMsg)：不存在返回 (null, '')；失败返回 (null, 错误描述)。
+(String?, String) regReadSz(int rootKey, String subKey, String valueName) {
+  final subPtr = subKey.toNativeUtf16();
+  final valPtr = valueName.isEmpty ? nullptr : valueName.toNativeUtf16();
+  final hKeyPtr = malloc<IntPtr>();
+  final typePtr = malloc<Uint32>();
+  final sizePtr = malloc<Uint32>();
+  Pointer<Uint8>? buf;
+  var opened = 0;
+  try {
+    final rcOpen = _regOpenKeyExW(rootKey, subPtr, 0, _keyRead, hKeyPtr);
+    if (rcOpen == _errFileNotFound) return (null, '');
+    if (rcOpen != _errSuccess) return (null, 'RegOpenKeyExW=$rcOpen');
+    opened = hKeyPtr.value;
+
+    sizePtr.value = 0;
+    final rcSize = _regQueryValueExW(
+      opened,
+      valPtr,
+      nullptr,
+      typePtr,
+      nullptr,
+      sizePtr,
+    );
+    if (rcSize == _errFileNotFound) return (null, '');
+    if (rcSize != _errSuccess) return (null, 'RegQueryValueExW(size)=$rcSize');
+    if (typePtr.value != _regSz && typePtr.value != _regExpandSz) {
+      return (null, '');
+    }
+    final byteLen = sizePtr.value;
+    if (byteLen == 0) return ('', '');
+
+    buf = malloc<Uint8>(byteLen + 2);
+    sizePtr.value = byteLen;
+    final rcData = _regQueryValueExW(
+      opened,
+      valPtr,
+      nullptr,
+      typePtr,
+      buf,
+      sizePtr,
+    );
+    if (rcData != _errSuccess) return (null, 'RegQueryValueExW(data)=$rcData');
+    final actualBytes = sizePtr.value;
+    final unitCount = actualBytes ~/ 2;
+    final units = buf.cast<Uint16>().asTypedList(unitCount);
+    var len = unitCount;
+    for (var i = 0; i < unitCount; i++) {
+      if (units[i] == 0) {
+        len = i;
+        break;
+      }
+    }
+    return (String.fromCharCodes(units.sublist(0, len)), '');
+  } catch (e) {
+    return (null, '$e');
+  } finally {
+    if (opened != 0) _regCloseKey(opened);
+    if (buf != null) malloc.free(buf);
+    malloc
+      ..free(subPtr)
+      ..free(hKeyPtr)
+      ..free(typePtr)
+      ..free(sizePtr);
+    if (valPtr != nullptr) malloc.free(valPtr);
+  }
+}
+
+/// 写入 REG_SZ 注册表值（键不存在会自动创建）。返回 Win32 错误码（0 = 成功）。
+int regWriteSz(int rootKey, String subKey, String valueName, String data) {
+  final subPtr = subKey.toNativeUtf16();
+  final valPtr = valueName.toNativeUtf16();
+  final dataPtr = data.toNativeUtf16();
+  final hKeyPtr = malloc<IntPtr>();
+  var opened = 0;
+  try {
+    final rcCreate = _regCreateKeyExW(
+      rootKey,
+      subPtr,
+      0,
+      nullptr,
+      0,
+      _keySetValue,
+      nullptr,
+      hKeyPtr,
+      nullptr,
+    );
+    if (rcCreate != _errSuccess) return rcCreate;
+    opened = hKeyPtr.value;
+    final cbData = (data.length + 1) * 2;
+    return _regSetValueExW(
+      opened,
+      valPtr,
+      0,
+      _regSz,
+      dataPtr.cast<Uint8>(),
+      cbData,
+    );
+  } finally {
+    if (opened != 0) _regCloseKey(opened);
+    malloc
+      ..free(subPtr)
+      ..free(valPtr)
+      ..free(dataPtr)
+      ..free(hKeyPtr);
+  }
+}
+
+/// 删除指定注册表值（不存在视作成功）。返回 Win32 错误码（0 = 成功）。
+int regDeleteValue(int rootKey, String subKey, String valueName) {
+  final subPtr = subKey.toNativeUtf16();
+  final valPtr = valueName.toNativeUtf16();
+  final hKeyPtr = malloc<IntPtr>();
+  var opened = 0;
+  try {
+    final rcOpen = _regOpenKeyExW(rootKey, subPtr, 0, _keySetValue, hKeyPtr);
+    if (rcOpen == _errFileNotFound) return _errSuccess;
+    if (rcOpen != _errSuccess) return rcOpen;
+    opened = hKeyPtr.value;
+    final rcDel = _regDeleteValueW(opened, valPtr);
+    return rcDel == _errFileNotFound ? _errSuccess : rcDel;
+  } finally {
+    if (opened != 0) _regCloseKey(opened);
+    malloc
+      ..free(subPtr)
+      ..free(valPtr)
+      ..free(hKeyPtr);
   }
 }

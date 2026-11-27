@@ -158,10 +158,9 @@ Future<List<String>> candidateDids(Map<String, Object?> cfg, String hubIp,
     break;
   }
 
-  // 证书例外的说明只报一次（v3.0.6：系统证书库不完整的机器靠它活下来）。
+  // 系统证书链补验的说明只报一次。
   if (takeCertFallbackNotice()) {
-    log?.call('  · 证书校验例外已启用：${certFallbackReason ?? ''}'
-        '（本机证书库缺证书，仅对小米接口放行）');
+    log?.call('  · ${certFallbackReason ?? '已通过 Windows 系统证书链补验'}');
   }
 
   final hit = <Map<String, Object?>>[];
@@ -294,9 +293,12 @@ String _passcodeNonce() {
 /// 依据：设备列表里中枢型号设备的 localip 字段（云端实时值，不受本机
 /// 网段/代理影响）。只回在线设备的 IP；拿不到（未登录/云不可达）返回
 /// 空表并记日志，绝不让它把主流程带崩。
-Future<List<String>> hubIpHints({void Function(Object?)? log}) async {
+Future<List<String>> hubIpHints({
+  void Function(Object?)? log,
+  Map<String, Object?>? cfg,
+}) async {
   try {
-    final cred = await mint(loadCfg(), sid: 'xiaomiio');
+    final cred = await mint(cfg ?? loadCfg(), sid: 'xiaomiio');
     final devs = await listDevices(cred);
     final ips = <String>[];
     for (final d in devs) {

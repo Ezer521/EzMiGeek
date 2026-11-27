@@ -1,16 +1,14 @@
 // main.dart —— EzMiGeek（Flutter 版）入口。
 //
-//   双击            → 正常开窗；已有实例在跑则本进程退出（.agent.lock 同款）
+//   双击            → 正常开窗；已有实例在跑则唤醒已有实例置前并退出
 //   --lang zh|en    → 锁语言（出图 / 自检用）
 //   --hub <ip>      → 手动指定极客版中枢 IP（优先级高于 settings.json 的 HubIp）
 //   --ui-png <path> → 离屏出图（窗口摆到设计分辨率 1043×1586），出完即退
-//
-// 与 Python 版共用：%LOCALAPPDATA%\EzMiGeek\ 下全部数据（config.json 凭据
-// DPAPI 同熵、settings.json、stats.json、.agent.lock、浏览器 profile、日志）。
 library;
 
+import 'dart:async';
 import 'dart:io';
-import 'dart:ui' as ui show ImageByteFormat;
+import 'dart:ui' as ui show ImageByteFormat, PlatformDispatcher;
 
 import 'package:flutter/material.dart' show Colors;
 import 'package:flutter/rendering.dart' show RenderRepaintBoundary;
@@ -21,25 +19,54 @@ import 'package:window_manager/window_manager.dart';
 import 'app.dart';
 import 'core/app_dirs.dart';
 import 'core/i18n.dart';
+import 'native/resize_lock.dart';
+import 'native/win32.dart' show signalRunningInstance;
 import 'services/app_log.dart';
 import 'services/code_service.dart';
 import 'services/dialogs.dart';
 import 'services/legal.dart';
 import 'services/single_instance.dart';
 import 'services/tray_service.dart';
+import 'services/update_checker.dart';
 import 'state/app_state.dart';
-import 'ui/window_fit.dart';
 import 'ui/ezshell.dart' show EzLogo, EzShellPainter;
+import 'ui/window_fit.dart';
 
-const String kVersion = '3.0.6';
+/// 应用版本号（可通过构建参数 `--dart-define=APP_VERSION=x.y.z` 覆盖，保持单一真相源）。
+const String kVersion = String.fromEnvironment(
+  'APP_VERSION',
+  defaultValue: '3.1.0',
+);
 
 /// --hub 命令行参数的落点（main 里灌进 state.hubOverride）。
 String hubArg = '';
 
-Future<void> main(List<String> args) async {
-  WidgetsFlutterBinding.ensureInitialized();
+void _installCrashHandlers() {
+  FlutterError.onError = (FlutterErrorDetails details) {
+    AppLog.writeCrash(
+      details.exception,
+      details.stack ?? StackTrace.current,
+    );
+  };
+  ui.PlatformDispatcher.instance.onError = (Object error, StackTrace stack) {
+    AppLog.writeCrash(error, stack);
+    return true;
+  };
+}
 
-  // --lang zh|en：只给自检 / 出图锁语言用（压过磁盘设置里的 LangZh）。
+Future<void> main(List<String> args) async {
+  runZonedGuarded(
+    () => _boot(args),
+    (Object error, StackTrace stack) {
+      AppLog.writeCrash(error, stack);
+    },
+  );
+}
+
+Future<void> _boot(List<String> args) async {
+  WidgetsFlutterBinding.ensureInitialized();
+  _installCrashHandlers();
+
   String? forcedLang;
   for (var i = 0; i < args.length - 1; i++) {
     if (args[i] == '--lang') {
@@ -50,53 +77,34 @@ Future<void> main(List<String> args) async {
     }
   }
 
-  // --hub <ip>：手动指定极客版中枢（优先级高于 settings.json 的 HubIp）。
   for (var i = 0; i < args.length - 1; i++) {
     if (args[i] == '--hub') {
       hubArg = args[i + 1].trim();
     }
   }
 
-  // ── --ui-png：出图模式 —— 不抢单实例、不弹免责声明、不上托盘，
-  //    窗口摆到设计分辨率，截完边界即退。
   final pngIdx = args.indexOf('--ui-png');
   final uiPng = pngIdx >= 0 && pngIdx + 1 < args.length;
 
-  // ── 单实例：已有实例在跑 → 记日志退出（Python 版 rc=2 同款）。
+  // ── 单实例：已有实例在跑 → 唤醒已有实例弹到前台后本进程退出 ──
   SingleInstance? singleton;
   if (!uiPng) {
     singleton = SingleInstance.tryBecomeOwner();
     if (singleton == null) {
-      AppLog.write('已有实例在跑，退出。');
-      exit(2);
+      final woken = signalRunningInstance();
+      AppLog.write(
+        woken ? '已有实例在跑，已发送唤起信号并退出。' : '已有实例在跑，退出。',
+      );
+      exit(woken ? 0 : 2);
     }
   }
 
-  // 头部 logo（真实应用图标）先解码好再进 UI。
-  await EzLogo.load();
-
-  final state = AppState();
-  state.hubOverride = hubArg;
-  state.loadSettingsAtStartup(); // 读设置 + 应用语言 + 注册表对齐自启 + 统计
-  if (forcedLang != null) {
-    Lang.set(forcedLang);
-    state.settings.langZh = forcedLang == 'zh';
-    state.sync();
-  }
-
-  if (uiPng) {
-    // 出图展示态：两枚拨杆摆「开」只是渲染需要 —— 不落盘、不写注册表，
-    // 真机设置不受影响；登录码行由 grab() 等取码完成后自然亮出真码。
-    state.settings.autoTrayDone = true;
-    state.settings.autoStart = true;
-    state.sync();
-  }
-
-  // ── 首次运行：免责声明确认（出图模式跳过）。用户点「取消」就退出。
+  // ── 首次运行：免责声明确认（必须在任何联网/局域网探测之前）──
   if (!uiPng && !File(disclaimerAck()).existsSync()) {
     final ok = confirmDisclaimer(legalAckText());
     if (!ok) {
       AppLog.write('首次运行的免责声明没有确认，退出。');
+      singleton?.dispose();
       exit(0);
     }
     try {
@@ -109,13 +117,29 @@ Future<void> main(List<String> args) async {
     }
   }
 
-  // ── 窗口：隐藏标题栏（三钮画在壳内），尺寸按工作区等比适配 ──
-  // ★ 粗调 + 客户区贴合（window_fit）：setSize 设的是外框，隐形调整边框会压坏
-  //   客户区比例 → 玻璃下缘露底衬带（EzAway 同款修法，四家族统一）。
+  await EzLogo.load();
+
+  final state = AppState();
+  state.hubOverride = hubArg;
+  state.loadSettingsAtStartup();
+  if (forcedLang != null) {
+    Lang.set(forcedLang);
+    state.settings.langZh = forcedLang == 'zh';
+    state.sync();
+  }
+
+  if (uiPng) {
+    state.settings.autoTrayDone = true;
+    state.settings.autoStart = true;
+    state.sync();
+  }
+
   await windowManager.ensureInitialized();
+  final minW = Platform.isWindows ? 1043 * 0.42 : 1043 * 0.35;
+  final minH = Platform.isWindows ? 1586 * 0.42 : 1586 * 0.35;
   final windowOptions = WindowOptions(
     size: initialClientRect(),
-    minimumSize: const Size(1043 * 0.42, 1586 * 0.42),
+    minimumSize: Size(minW, minH),
     center: true,
     title:
         'EzMiGeek · ${Lang.zh ? '米家自动化极客版自动登录助手' : 'Mi Geek auto sign-in helper'}',
@@ -126,18 +150,38 @@ Future<void> main(List<String> args) async {
     await windowManager.show();
     await windowManager.focus();
   });
+
+  Future<void> showAndFocusPanel() async {
+    if (await windowManager.isMinimized()) {
+      await windowManager.restore();
+    }
+    await windowManager.show();
+    await windowManager.focus();
+  }
+
+  if (Platform.isWindows) {
+    ResizeRatioLock.onActivate = () {
+      AppLog.write('收到第二实例唤醒信号 → 弹出并置前主面板。');
+      unawaited(showAndFocusPanel());
+    };
+  }
+
   final fitNote = await applyWindowFit();
   AppLog.write('窗口贴合：$fitNote');
-  // 正式模式拦 ✕：关窗一律收托盘（程序继续待命），彻底退出走托盘菜单。
   if (!uiPng) await windowManager.setPreventClose(true);
 
-  // ── 业务回调 + 托盘 ──
   final tray = TrayService();
 
-  // ── 本地取码服务：把已登录的取码能力开放给本机 Ez 系软件（EzVibe 商店
-  //    版的取码通道）。失败只记日志，绝不拖垮主程序。出图模式不起。
-  final codeService = CodeService();
-  if (!uiPng) await codeService.start();
+  // ── 可选本地取码服务（仅 127.0.0.1，可通过 settings.json LocalCodeService=false 关闭）──
+  final codeService = CodeService(
+    version: kVersion,
+    credsProvider: () => state.memCreds,
+  );
+  if (!uiPng && state.settings.localCodeService) {
+    await codeService.start();
+  } else if (!uiPng) {
+    AppLog.write('取码服务：已按 settings.json（LocalCodeService=false）关闭。');
+  }
 
   Future<void> hideToTray() async {
     AppLog.write('面板「收起到托盘」。');
@@ -151,40 +195,42 @@ Future<void> main(List<String> args) async {
       await tray.dispose();
     }
     singleton?.dispose();
+    AppLog.write('程序退出，托盘与本地服务已清理（本轮浏览器按约定保留）。');
     AppLog.close();
-    AppLog.write('程序退出，托盘已清理（本轮浏览器按原版约定保留）。');
     await windowManager.destroy();
   }
 
-  state
-    ..onHideToTray = hideToTray
-    ..onQuit = exitApp;
+  state.onShowPanel = () => unawaited(showAndFocusPanel());
+  state.onHideToTray = hideToTray;
+  state.onQuit = exitApp;
 
   if (!uiPng) {
     try {
-      const trayAsset = 'assets/app.ico';
-      const trayName = 'tray.ico';
+      // 托盘图标：Windows 用 .ico，macOS 用 .png（system_tray 两平台各自要求）。
+      final trayAsset = Platform.isWindows ? 'assets/app.ico' : 'assets/logo.png';
+      final trayName = Platform.isWindows ? 'tray.ico' : 'tray.png';
       final iconBytes = await rootBundle.load(trayAsset);
-      final iconFile = File('${dataDir()}/$trayName');
+      final iconFile = File(pJoin(dataDir(), trayName));
       await iconFile.writeAsBytes(iconBytes.buffer.asUint8List(), flush: true);
-      tray.onShowPanel = () async {
-        await windowManager.show();
-        await windowManager.focus();
-      };
-      tray.onOpenGeek = () => state.onOpenGeekClicked();
-      tray.onStopBrowser = () => state.stopBrowser();
-      tray.onLogs = () => state.openLogsFolder();
-      tray.onLegal = () => state.showLegal();
+      tray.onShowPanel = () => unawaited(showAndFocusPanel());
+      tray.onDoubleClick = () => unawaited(state.onTrayDoubleClicked());
+      tray.onOpenGeek = () => unawaited(state.onOpenGeekClicked());
+      tray.onStopBrowser = () => unawaited(state.stopBrowser());
+      tray.onLogs = () => unawaited(state.openLogsFolder());
+      tray.onLegal = () => unawaited(state.showLegal());
+      tray.onCheckUpdate = () => unawaited(checkForUpdatesInteractive(kVersion));
       tray.onQuit = exitApp;
       await tray.init(iconPath: iconFile.path, tooltip: t('app.name'));
     } catch (e) {
       AppLog.write('托盘初始化失败：$e');
     }
-    // 切语言时托盘菜单跟着重建（字表即菜单）。
+    // 仅在语言真正切换时重建托盘菜单，避免每次状态刷新重复重建。
+    var lastTrayLangZh = Lang.zh;
     state.addListener(() {
-      if (state.ui.langZh != Lang.zh) return; // 只在真的翻面时动
-      tray.rebuildMenu();
-      tray.setToolTip(t('app.name'));
+      if (Lang.zh == lastTrayLangZh) return;
+      lastTrayLangZh = Lang.zh;
+      unawaited(tray.rebuildMenu());
+      unawaited(tray.setToolTip(t('app.name')));
     });
   }
 
@@ -196,10 +242,9 @@ Future<void> main(List<String> args) async {
   if (uiPng) {
     final outPath = args[pngIdx + 1];
     await windowManager.setSize(const Size(1043, 1586));
-    EzShellPainter.fitWhole = true; // 屏幕放不下整幅时按高度缩放，出图可核对全布局
+    EzShellPainter.fitWhole = true;
     final key = GlobalKey();
     runApp(EzMiGeekApp(state: state, captureKey: key));
-    // 等两帧 + 一拍，保证首帧栅格化完成再抓边界。15 秒兜底退出（防卡死）。
     var tries = 0;
     Future<void> grab() async {
       tries++;
@@ -209,13 +254,9 @@ Future<void> main(List<String> args) async {
       }
       try {
         if (!state.codeSettled) throw StateError('登录码还没取到，再等一拍');
-        // 状态落定 ≠ 画面已更新：等当帧画完再抓，不然截到的还是旧帧。
         await WidgetsBinding.instance.endOfFrame;
-        // async gap 之后直接从 GlobalKey 现取 boundary，不存 ctx 变量。
         final ro = key.currentContext?.findRenderObject();
         if (ro is! RenderRepaintBoundary) throw StateError('boundary 尚未挂载');
-        // 出图密度自适应：目标 ≈2× 设计宽（1043×2=2086px）——窗口被屏幕压小
-        // 就用更高密度补回清晰度（封顶 3×），窗口已到设计尺寸就正好 2×。
         final density = (2086 / ro.size.width).clamp(1.0, 3.0);
         final image = await ro.toImage(pixelRatio: density);
         final data = await image.toByteData(format: ui.ImageByteFormat.png);

@@ -1,0 +1,51 @@
+name: 问题反馈 (Bug Report)
+description: 反馈桌面版或油猴脚本在使用过程中遇到的问题
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈！提交前请确认已升级到最新 Release，并**切勿直接粘贴包含个人账号 Cookie/Token 的原始抓包内容**。
+  - type: dropdown
+    id: edition
+    attributes:
+      label: 使用的版本形态
+      options:
+        - Windows 桌面版 (EzMiGeek.exe)
+        - 篡改猴脚本版 (EzMiGeek-script.user.js)
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: 版本号
+      placeholder: 例如 v3.1.0
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: 运行环境（系统 / 浏览器 / 中枢型号与端口）
+      placeholder: 例如 Windows 11 24H2 / Edge / 独立中枢网关(80端口) 或 BE6500 Pro(8086端口)
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: 问题描述与复现步骤
+      placeholder: 清晰描述你做了什么、预期看到什么、实际发生了什么。
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志片段（桌面版请附 agent.log / crash.log 相关片段，脚本版附控制台报错）
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 我已确认日志中不包含个人密码、Cookie 等敏感隐私信息
+          required: true

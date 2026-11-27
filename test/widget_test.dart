@@ -29,6 +29,7 @@ void main() {
 
   test('命中表：5 行设置卡 = 码行 + 3 拨杆 + 1 动作行（红方块本身）', () {
     // 行序（2026-10-19 二改）：0 登录码 1 收托盘 2 双击开网页 3 自启 4 重登。
+    expect(ezHit(Geo.c3IcoX + 10, Geo.c3RowCy(0)), EzHit.codeRefresh);
     expect(ezHit(Geo.c3TxX + 10, Geo.c3RowCy(0)), EzHit.codeRow);
     expect(ezHit(Geo.c3TxX + 10, Geo.c3RowCy(1)), EzHit.toggleTray);
     expect(ezHit(Geo.c3TxX + 10, Geo.c3RowCy(2)), EzHit.toggleDbl);

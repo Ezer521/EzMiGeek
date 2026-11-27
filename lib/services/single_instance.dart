@@ -1,11 +1,12 @@
-// single_instance.dart —— 单实例文件锁（__main__.SingleInstance 同款）。
+// single_instance.dart —— 跨平台单实例文件锁。
 //
-// 与 C#/Python 版共用同一个锁文件 %LOCALAPPDATA%\EzMiGeek\.agent.lock。
-// 锁 = CreateFileW 独占打开（dwShareMode=0），第二实例打不开 = 已有实例。
-// 进程退出时内核自动关句柄放锁，无需显式清理。
+// Windows：CreateFileW 独占打开（dwShareMode=0）；
+// macOS：RandomAccessFile.lockSync(FileLock.exclusive)。
+// 进程退出时内核自动释放锁。
 library;
 
 import 'dart:ffi';
+import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 
@@ -43,16 +44,25 @@ const int _openAlways = 4;
 const int _fileFlagNormal = 0x80;
 
 class SingleInstance {
-  SingleInstance._win(this._handle);
+  SingleInstance._win(this._handle) : _raf = null;
+  SingleInstance._posix(this._raf) : _handle = 0;
 
-  final int _handle; // Windows：CreateFileW 句柄
+  final int _handle;
+  final RandomAccessFile? _raf;
 
-  /// 尝试成为唯一实例。返回实例 = 拿到了锁；null = 已有实例在跑。
-  ///
-  /// 锁 = 独占打开数据目录里的 .agent.lock——与 Python/C# 版共用同一文件。
-  /// 第二实例的宿主见 main()：写一行日志后退出（Python 版 rc=2 同款）。
   static SingleInstance? tryBecomeOwner() {
-    final path = '${dataDir()}\\.agent.lock';
+    final path = pJoin(dataDir(), '.agent.lock');
+    if (!Platform.isWindows) {
+      final f = File(path)..createSync(recursive: true);
+      final raf = f.openSync(mode: FileMode.append);
+      try {
+        raf.lockSync(FileLock.exclusive);
+      } catch (_) {
+        raf.closeSync();
+        return null;
+      }
+      return SingleInstance._posix(raf);
+    }
     final p = path.toNativeUtf16();
     try {
       final handle = _createFileW(
@@ -64,9 +74,8 @@ class SingleInstance {
         _fileFlagNormal,
         nullptr,
       );
-      // INVALID_HANDLE_VALUE 的 address 是 0xFFFFFFFFFFFFFFFF（-1）。
       if (handle == nullptr || handle.address == 0xFFFFFFFFFFFFFFFF) {
-        return null; // 已有实例
+        return null;
       }
       return SingleInstance._win(handle.address);
     } finally {
@@ -74,8 +83,14 @@ class SingleInstance {
     }
   }
 
-  /// 干净退出时放锁（进程退出内核也会放，这里只是把语义写明）。
   void dispose() {
+    if (_raf != null) {
+      try {
+        _raf.unlockSync();
+        _raf.closeSync();
+      } catch (_) {}
+      return;
+    }
     if (_handle != 0) _closeHandle(_handle);
   }
 }

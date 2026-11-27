@@ -15,6 +15,9 @@ import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 
+import '../native/win32.dart'
+    show hkeyClassesRoot, hkeyCurrentUser, regReadSz;
+
 /// Windows 上按序找的知名浏览器路径。
 final List<String> windowsCandidates = [
   r'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe',
@@ -25,8 +28,60 @@ final List<String> windowsCandidates = [
   r'%LOCALAPPDATA%\Microsoft\Edge\Application\msedge.exe',
 ];
 
-/// 判「默认浏览器能不能走 CDP」用的名单：知名 Chromium 系 + 'chrom' 子串
-/// 兜底。名单外的按"不是 Chromium"处理 —— 走降级轮，宁可少自动、不可乱承诺。
+/// macOS 上按序查找的知名 Chromium 系浏览器可执行文件（直启二进制才能传入 CDP flags）。
+final List<String> macCandidates = [
+  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+  '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
+  '/Applications/Chromium.app/Contents/MacOS/Chromium',
+  '/Applications/Vivaldi.app/Contents/MacOS/Vivaldi',
+  '/Applications/Arc.app/Contents/MacOS/Arc',
+  '/Applications/Opera.app/Contents/MacOS/Opera',
+  '~/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  '~/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+  '~/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
+];
+
+/// macOS 默认浏览器 Bundle ID 到可执行文件路径的常见映射。
+const Map<String, List<String>> _macBundleToBins = {
+  'com.google.chrome': [
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    '~/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  ],
+  'com.microsoft.edgemac': [
+    '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+    '~/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+  ],
+  'com.brave.browser': [
+    '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
+    '~/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
+  ],
+  'org.chromium.chromium': [
+    '/Applications/Chromium.app/Contents/MacOS/Chromium',
+    '~/Applications/Chromium.app/Contents/MacOS/Chromium',
+  ],
+  'com.vivaldi.vivaldi': [
+    '/Applications/Vivaldi.app/Contents/MacOS/Vivaldi',
+    '~/Applications/Vivaldi.app/Contents/MacOS/Vivaldi',
+  ],
+  'company.thebrowser.browser': [
+    '/Applications/Arc.app/Contents/MacOS/Arc',
+    '~/Applications/Arc.app/Contents/MacOS/Arc',
+  ],
+  'com.operasoftware.opera': [
+    '/Applications/Opera.app/Contents/MacOS/Opera',
+    '~/Applications/Opera.app/Contents/MacOS/Opera',
+  ],
+  'com.apple.safari': [
+    '/Applications/Safari.app/Contents/MacOS/Safari',
+  ],
+  'org.mozilla.firefox': [
+    '/Applications/Firefox.app/Contents/MacOS/firefox',
+    '~/Applications/Firefox.app/Contents/MacOS/firefox',
+  ],
+};
+
+/// 判「默认浏览器能不能走 CDP」用的名单。
 const Set<String> chromiumExeNames = {
   'msedge.exe',
   'chrome.exe',
@@ -40,6 +95,13 @@ const Set<String> chromiumExeNames = {
   'qqbrowser.exe',
   'sogou_explorer.exe',
   'baidubrowser.exe',
+  'google chrome',
+  'microsoft edge',
+  'brave browser',
+  'chromium',
+  'vivaldi',
+  'opera',
+  'arc',
 };
 
 const String _pidFile = '.launcher-pid';
@@ -51,15 +113,23 @@ extension StringLines on String {
           .toList();
 }
 
-String expandEnv(String p) => p.contains('%')
-    ? p.replaceAllMapped(
-        RegExp('%([^%]+)%'),
-        (m) => Platform.environment[m.group(1)] ?? m.group(1)!,
-      )
-    : p;
+String expandEnv(String p) {
+  var out = p;
+  if (out.startsWith('~/')) {
+    final home = Platform.environment['HOME'] ?? '';
+    if (home.isNotEmpty) out = '$home${out.substring(1)}';
+  }
+  if (out.contains('%')) {
+    out = out.replaceAllMapped(
+      RegExp('%([^%]+)%'),
+      (m) => Platform.environment[m.group(1)] ?? m.group(1)!,
+    );
+  }
+  return out;
+}
 
 String? findBrowser() {
-  final candidates = windowsCandidates;
+  final candidates = Platform.isWindows ? windowsCandidates : macCandidates;
   for (final p in candidates) {
     final exe = expandEnv(p);
     if (File(exe).existsSync()) return exe;
@@ -74,49 +144,63 @@ bool isChromiumExe(String? exe) {
       name.contains('chrom') ||
       name.contains('edge') ||
       name.contains('brave') ||
-      name.contains('vivaldi');
+      name.contains('vivaldi') ||
+      name.contains('opera');
 }
 
-String _reg(List<String> args) {
+(String?, List<String>) _macDefaultBrowser() {
   try {
-    final r = Process.runSync(
-      'reg',
-      args,
-      stdoutEncoding: const SystemEncoding(),
-      stderrEncoding: const SystemEncoding(),
-    );
-    return r.exitCode == 0 ? r.stdout.toString().trim() : '';
-  } catch (_) {
-    return '';
-  }
+    final home = Platform.environment['HOME'] ?? '';
+    final plist =
+        '$home/Library/Preferences/com.apple.LaunchServices/com.apple.launchservices.secure.plist';
+    if (File(plist).existsSync()) {
+      final r = Process.runSync(
+        '/usr/bin/plutil',
+        ['-convert', 'json', '-o', '-', plist],
+        stdoutEncoding: utf8,
+      );
+      if (r.exitCode == 0) {
+        final raw = jsonDecode(r.stdout.toString());
+        if (raw is Map && raw['LSHandlers'] is List) {
+          for (final scheme in ['https', 'http']) {
+            for (final item in raw['LSHandlers'] as List) {
+              if (item is Map &&
+                  '${item['LSHandlerURLScheme'] ?? ''}'.toLowerCase() ==
+                      scheme) {
+                final bid = '${item['LSHandlerRoleAll'] ?? ''}'.toLowerCase();
+                final bins = _macBundleToBins[bid];
+                if (bins != null) {
+                  for (final b in bins) {
+                    final p = expandEnv(b);
+                    if (File(p).existsSync()) return (p, const []);
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  } catch (_) {}
+  return (null, const []);
 }
 
-/// 解析系统默认浏览器（http 关联）。返回 (exe, 额外参数列表)。
-/// ★ 只读不写 —— UserChoice 的哈希保护防的是【改】，读取不需要权限。
+/// 解析系统默认浏览器（http/https 关联）。
+/// Windows 走原生 advapi32 注册表；macOS 解析 LaunchServices 默认协议处理器。
 (String?, List<String>) defaultBrowser() {
-  final out1 = _reg([
-    'query',
-    r'HKCU\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\http\UserChoice',
-    '/v',
+  if (!Platform.isWindows) return _macDefaultBrowser();
+  final (progId, _) = regReadSz(
+    hkeyCurrentUser,
+    r'Software\Microsoft\Windows\Shell\Associations\UrlAssociations\http\UserChoice',
     'ProgId',
-  ]);
-  String? progId;
-  for (final line in out1.splitLines()) {
-    if (line.contains('ProgId') && line.contains('REG_SZ')) {
-      progId = line.split('REG_SZ').last.trim();
-      break;
-    }
-  }
-  if (progId == null || progId.isEmpty) return (null, const []);
-  final out2 = _reg(['query', 'HKCR\\$progId\\shell\\open\\command', '/ve']);
-  String? cmd;
-  for (final line in out2.splitLines()) {
-    if (line.contains('REG_SZ')) {
-      cmd = line.split('REG_SZ').last.trim();
-      break;
-    }
-  }
-  if (cmd == null || cmd.isEmpty) return (null, const []);
+  );
+  if (progId == null || progId.trim().isEmpty) return (null, const []);
+  final (cmd, _) = regReadSz(
+    hkeyClassesRoot,
+    '${progId.trim()}\\shell\\open\\command',
+    '',
+  );
+  if (cmd == null || cmd.trim().isEmpty) return (null, const []);
   final (exe, args) = splitCommandLine(cmd);
   if (exe != null && !File(exe).existsSync()) return (null, const []);
   return (exe, args);
@@ -143,7 +227,7 @@ List<String> _tokens(String rest) => rest
     .where((t) => t.isNotEmpty && t.toUpperCase() != '%1')
     .toList();
 
-// ══════════════════ 进程查询 / 强杀 ══════════════════
+// ══════════════════ 进程查询 / 强杀（Windows FFI 惰性初始化）══════════════════
 
 final DynamicLibrary _k32 = DynamicLibrary.open('kernel32.dll');
 
@@ -168,8 +252,15 @@ const int _processQueryLimitedInformation = 0x1000;
 const int _processTerminate = 0x0001;
 
 /// PID 活着就返回它的 exe 完整路径，否则返回空串。
-/// ★ 不用 wmic：Win11 已移除。直接问内核，零子进程、零依赖。
 String queryImage(int pid) {
+  if (!Platform.isWindows) {
+    try {
+      final r = Process.runSync('/bin/ps', ['-p', '$pid', '-o', 'comm=']);
+      return r.exitCode == 0 ? r.stdout.toString().trim() : '';
+    } catch (_) {
+      return '';
+    }
+  }
   final h = _openProcess(_processQueryLimitedInformation, 0, pid);
   if (h == 0) return '';
   final buf = malloc<Uint16>(1024);
@@ -189,6 +280,9 @@ String queryImage(int pid) {
 
 /// 按 PID 强杀（不杀进程树，主进程死了 Chromium 子进程会自己退）。
 bool killPid(int pid) {
+  if (!Platform.isWindows) {
+    return Process.killPid(pid, ProcessSignal.sigkill);
+  }
   final h = _openProcess(_processTerminate, 0, pid);
   if (h == 0) return false;
   try {
@@ -209,10 +303,6 @@ String _readSmallFile(String path) {
   }
 }
 
-/// 让一个「记号文件」失效，且【绝不阻塞】。
-/// ★★ 不用 delete：受管环境下删除会走"安全删除"通道（重试 + 回收站），
-///   Python 版实测在 DevToolsActivePort 上卡了 51.9 秒 —— 那正是用户抱怨
-///   的"打开速度好慢"。语义上要的只是"别把旧值当新值读"：截断成空文件即可。
 bool forgetFile(String path) {
   try {
     File(path).writeAsStringSync('', flush: true);
@@ -222,50 +312,65 @@ bool forgetFile(String path) {
   }
 }
 
-/// 杀掉上一次没退干净、还占着这个 profile 的浏览器实例。
-/// 只在确认那个 PID 现在还是浏览器时才动手，绝不误杀别的程序。
-int killStale(String profileDir) {
+Future<int> killStale(String profileDir) async {
   final pid = lastPid(profileDir);
   if (pid == 0) return 0;
   final img = queryImage(pid);
-  if (img.isEmpty) return 0; // 进程已经不在了，正常情况
+  if (img.isEmpty) return 0;
   if (!isChromiumExe(img)) {
-    return 0; // PID 被复用成别的程序了，别碰
+    return 0;
   }
   final ok = killPid(pid);
   if (ok) {
-    // TerminateProcess 是异步的。不等它真消失就 launch 新浏览器的话，
-    // 新进程可能把这个"正在死"的实例当成已存在实例、把命令转交过去。
     final deadline = DateTime.now().add(const Duration(seconds: 5));
     while (DateTime.now().isBefore(deadline)) {
       if (queryImage(pid).isEmpty) break;
-      sleep(const Duration(milliseconds: 100));
+      await Future<void>.delayed(const Duration(milliseconds: 100));
     }
   }
   forgetFile('$profileDir/$_pidFile');
   return ok ? pid : 0;
 }
 
-/// 兜底清场：杀掉命令行里带着【本 profile】的浏览器进程。
-/// ★ 按 `--user-data-dir=<本 profile>` 精确匹配 —— 绝不碰用户自己的浏览器。
-///   子串，不经过 shell，无引号转义问题）。只挂在 launch 的重试路径上。
-int killProfileHolders(String profileDir) {
-  final needle = '--user-data-dir=${File(profileDir).absolute.path}'.replaceAll(
-    "'",
-    "''",
-  );
-  final ps =
-      "Get-CimInstance Win32_Process -Filter \""
-      "Name='msedge.exe' OR Name='chrome.exe' OR Name='brave.exe' "
-      "OR Name='chromium.exe'\" | "
-      "Where-Object { \$_.CommandLine -like '*$needle*' } | "
-      "ForEach-Object { Stop-Process -Id \$_.ProcessId -Force }";
+/// 兜底清场：优先通过 CDP 发送优雅 Browser.close；macOS 上失败时再按本专用
+/// profile 精确匹配 `pkill -f` 兜底（绝不碰用户日常浏览器）。
+Future<int> killProfileHolders(String profileDir) async {
   try {
-    final r = Process.runSync('powershell.exe', ['-NoProfile', '-Command', ps]);
-    return r.exitCode == 0 ? 1 : 0;
-  } catch (_) {
-    return 0;
+    final f = File('$profileDir/DevToolsActivePort');
+    if (f.existsSync()) {
+      final lines = f.readAsStringSync().splitLines();
+      if (lines.isNotEmpty) {
+        final port = int.tryParse(lines.first.trim());
+        if (port != null && await probePort(port)) {
+          final j = await httpJson(
+            port,
+            '/json/version',
+            timeout: const Duration(seconds: 2),
+          );
+          final wsUrl = '${j?['webSocketDebuggerUrl'] ?? ''}';
+          if (wsUrl.isNotEmpty) {
+            final ws = await WebSocket.connect(wsUrl)
+                .timeout(const Duration(seconds: 2));
+            try {
+              ws.add(jsonEncode({'id': 1, 'method': 'Browser.close', 'params': {}}));
+              await Future<void>.delayed(const Duration(milliseconds: 500));
+            } finally {
+              await ws.close();
+            }
+            return 1;
+          }
+        }
+      }
+    }
+  } catch (_) {}
+  if (!Platform.isWindows) {
+    try {
+      final needle = '--user-data-dir=${File(profileDir).absolute.path}';
+      final r = await Process.run('/usr/bin/pkill', ['-9', '-f', needle]);
+      return r.exitCode == 0 ? 1 : 0;
+    } catch (_) {}
   }
+  return 0;
 }
 
 Future<bool> probePort(
@@ -368,7 +473,7 @@ Future<Map<String, Object?>?> findPage(
   return null;
 }
 
-// ══════════════════ 窗口操作（user32）══════════════════
+// ══════════════════ 窗口操作（Windows user32 惰性初始化 + macOS 置前）══════════════════
 
 final DynamicLibrary _u32 = DynamicLibrary.open('user32.dll');
 
@@ -435,9 +540,8 @@ final int Function(int, Pointer<_Rect>) _getWindowRect = _u32
       int Function(int, Pointer<_Rect>)
     >('GetWindowRect');
 
-/// 某个 pid 的【面积最大的可见顶层窗口】（主浏览器窗口稳赢 —— Edge 有一堆
-/// 可见的顶层小窗口，"第一个可见的"很可能不是主窗口）。
 ({int hwnd, int area})? biggestVisibleWindowOf(int pid) {
+  if (!Platform.isWindows) return null;
   var best = 0, bestArea = 0;
   final pidPtr = malloc<Uint32>();
   final rc = malloc<_Rect>();
@@ -467,14 +571,21 @@ final int Function(int, Pointer<_Rect>) _getWindowRect = _u32
   return (hwnd: best, area: bestArea);
 }
 
-/// 把 pid 对应的主窗口带到前台（托盘「打开极客版」时的可见反馈）。
+/// 把 pid 对应的浏览器主窗口带到前台。
 Future<void> focusProcess(int pid) async {
+  if (!Platform.isWindows) {
+    try {
+      await Process.run('/usr/bin/osascript', [
+        '-e',
+        'tell application "System Events" to set frontmost of first process whose unix id is $pid to true',
+      ]);
+    } catch (_) {}
+    return;
+  }
   final found = biggestVisibleWindowOf(pid);
   if (found == null) return;
   final hwnd = found.hwnd;
-  if (_isIconic(hwnd) != 0) _showWindow(hwnd, 9); // SW_RESTORE
-  // Windows 不让后台进程抢前台。绕法是标准的 AttachThreadInput：
-  // 把自己的输入队列临时挂到前台线程上，两个线程就"共享"了前台权。
+  if (_isIconic(hwnd) != 0) _showWindow(hwnd, 9);
   final ourTid = _k32.lookupFunction<Uint32 Function(), int Function()>(
     'GetCurrentThreadId',
   )();
@@ -505,19 +616,18 @@ Future<void> focusProcess(int pid) async {
   _switchToThisWindow(hwnd, 1);
 }
 
-/// 把 pid 的主窗口真·最大化（SW_MAXIMIZE，以 IsZoomed 为准收工）。
-/// ★ --start-maximized 实测只给伪最大化（尺寸越出屏幕、IsZoomed()==False），
-///   所以 launch 成功后补这一刀。
+/// 把 pid 的主窗口最大化（Windows 补 SW_MAXIMIZE；macOS 直接放行）。
 Future<bool> maximizeWindowOfPid(
   int pid, {
   Duration timeout = const Duration(seconds: 6),
 }) async {
+  if (!Platform.isWindows) return true;
   final deadline = DateTime.now().add(timeout);
   while (DateTime.now().isBefore(deadline)) {
     final found = biggestVisibleWindowOf(pid);
     if (found != null) {
       if (_isZoomed(found.hwnd) != 0) return true;
-      _showWindow(found.hwnd, 3); // SW_MAXIMIZE
+      _showWindow(found.hwnd, 3);
       await Future<void>.delayed(const Duration(milliseconds: 250));
       if (_isZoomed(found.hwnd) != 0) return true;
     }
@@ -647,8 +757,8 @@ Future<Launched> launchBrowser(
     } catch (_) {}
     if (attempt == 1) {
       await Future<void>.delayed(const Duration(seconds: 1));
-      killStale(profileDir);
-      killProfileHolders(profileDir);
+      await killStale(profileDir);
+      await killProfileHolders(profileDir);
     }
   }
   throw StateError('$lastErr');

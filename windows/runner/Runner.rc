@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "com.ezer" "\0"
-            VALUE "FileDescription", "ezmigeek_flutter" "\0"
+            VALUE "CompanyName", "Ezer" "\0"
+            VALUE "FileDescription", "EzMiGeek - Mi Geek Auto Sign-In Helper" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "ezmigeek_flutter" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 com.ezer. All rights reserved." "\0"
-            VALUE "OriginalFilename", "ezmigeek_flutter.exe" "\0"
-            VALUE "ProductName", "ezmigeek_flutter" "\0"
+            VALUE "InternalName", "EzMiGeek" "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 Ezer. MIT License." "\0"
+            VALUE "OriginalFilename", "EzMiGeek.exe" "\0"
+            VALUE "ProductName", "EzMiGeek" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

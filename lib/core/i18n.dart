@@ -1,8 +1,8 @@
 // i18n.dart —— 界面文案中英双份字表（本文件即字表正身，直接在此维护）。
 //
-// 约定：界面上所有文字都从这张表出；状态文案存 (key, args)
-// 切语言时重算；缺 key 返回 ⟦key⟧ 占位符让漏译一眼可见；
-// 中英两条必须成对增删。
+// 约定：界面上所有文字都从这张表出；状态文案存 (key, args) 切语言时重算；
+// 缺 key 返回 ⟦key⟧ 占位符让漏译一眼可见；中英两条必须 1:1 成对增删。
+library;
 
 String _lang = 'zh';
 
@@ -16,31 +16,6 @@ const Map<String, String> _zhTable = {
   'btn.doc': '使用说明',
   'btn.log': '查看日志',
   'c1.hint': '请阅读使用说明',
-  'card.clear': '清除数据',
-  'card.clear.sub': '日志、截图与统计',
-  'card.clear.btn': '清除',
-  'card.reset': '重新配置',
-  'card.reset.sub': '恢复默认设置',
-  'card.reset.btn': '重置',
-  'dlg.clear.title': 'EzMiGeek · 清除数据',
-  'dlg.clear.li.logs': '  · 运行日志        %d 个 · %s',
-  'dlg.clear.li.shots': '  · 调试截图        %d 张 · %s',
-  'dlg.clear.li.stats': '  · 登录次数统计    %d 次',
-  'dlg.clear.li.cache': '  · 各种缓存        %d 个文件 · %s',
-  'dlg.clear.body': '将要清除 EzMiGeek 在本机留下的数据：\n\n%s\n\n选择：\n【是】  只清上面这些 —— 保留登录状态，不用重新登录\n【否】  连登录状态一起清（小米凭据 + 浏览器资料）—— 下次要重新登录\n【取消】什么都不做\n\n（小文件会先备份到 .bak-时间戳 那个文件夹，后悔了能自己拖回来）',
-  'dlg.reset.title': 'EzMiGeek · 重新配置',
-  'dlg.reset.li.settings': '  · 界面设置 → 恢复出厂默认（语言保持不变）',
-  'dlg.reset.li.auto': '  · 开机自动启动 → 关掉，并撤掉注册表里那一行',
-  'dlg.reset.li.legal': '  · 免责声明 → 下次启动会再弹一次',
-  'dlg.reset.body': '将要重置 EzMiGeek 的配置：\n\n%s\n\n【确定】  重置\n【取消】  什么都不做\n\n登录凭据、日志、统计都不动（想换小米账号：用「清除数据」并选「否」）。',
-  'st.clearing': '正在清除数据…',
-  'st.resetting': '正在重置配置…',
-  'info.cleared': '已清除数据（小文件已备份）',
-  'info.reset': '已重置为默认设置（语言未改）',
-  'info.cleared.part': '已清除数据（%d 项没做成）',
-  'info.reset.part': '已重置（%d 项没做成）',
-  'info.clearfail': '清除失败：%s',
-  'info.resetfail': '重置失败：%s',
   'info.busyblock': '正在跑一轮，结束后再试',
   'lab.total': '总共登录次数',
   'lab.today': '今天登录次数',
@@ -50,8 +25,9 @@ const Map<String, String> _zhTable = {
   'bottom.idle': '点上面的按钮打开极客版，登录码会自动填好。',
   'row.autostart': '开机自动启动',
   'as.on': '随 Windows 一起启动',
-  'as.elsewhere': '注册表里指向别的路径，拨一下就能修正',
-  'as.readfail': '读不到注册表（%s）',
+  'as.on.mac': '随 macOS 登录一起启动',
+  'as.elsewhere': '自启配置指向别的路径，拨一下就能修正',
+  'as.readfail': '读不到自启状态（%s）',
   'as.unknown': '未知原因',
   'row.relogin': '重新登录小米账号',
   'row.relogin.sub': '登录过期后点这里重新登一次',
@@ -64,13 +40,12 @@ const Map<String, String> _zhTable = {
   'row.code.loading': '正在取码…',
   'row.code.tap': '点击复制 · %s 取到',
   'row.code.fail': '取码失败 · 点击重试',
+  'row.code.needlogin': '未登录小米账号 · 点「极客开启」登录',
   'row.code.copied': '已复制到剪贴板',
   'info.idle': '提示：登录码默认 5 分钟失效，超时会自动重试。',
   'info.savefail': '保存失败：%s',
   'info.credsavefail': '凭据写盘失败（%s）—— 本轮先用刚登录拿到的凭据继续',
-  'info.docmiss': '没找到使用说明.txt',
   'info.relogin_ok': '已重新登录，凭据已更新',
-  'st.legal': '等待你阅读免责声明…',
   'st.busy_round': '已经在跑一轮了…',
   'st.kick': '正在跑一轮…',
   'st.kick.bottom': '本轮已开始：正在打开极客版…',
@@ -81,12 +56,9 @@ const Map<String, String> _zhTable = {
   'st.error.bottom': '本轮因异常结束',
   'st.fetch': '正在取登录码…',
   'st.fetch.bottom': '检测到输码界面 · 本轮第 %d 次',
-  'st.fetch.manual': '正在等输码页出现…',
   'st.fill': '正在填入登录码…',
   'st.ok': '✓ 已登录',
   'st.ok.bottom': '本轮已成功 %d 次 · 本次用时 %.0f 秒',
-  'st.manual': '填码失败，请手动输入',
-  'st.manual.bottom': '已连败 %d 次，转人工',
   'st.paused': '已转人工，自动填码暂停',
   'st.paused.bottom': '可在网页里手动输码；点「极客开启」恢复自动',
   'st.manualok': '✓ 已登录（手动输入）',
@@ -97,31 +69,24 @@ const Map<String, String> _zhTable = {
   'st.busyrelogin.bottom': '重新登录结束后再试',
   'rc.0.status': '空闲',
   'rc.0.bottom': '本轮结束：已完成，仍在待命',
-  'rc.0.balloon': '这轮跑完了。',
+  'rc.1.status': '出错了：没跑起来',
+  'rc.1.bottom': '本轮结束：环境有问题（没找到中枢/浏览器或超时）',
   'rc.3.status': '空闲（没输码界面）',
   'rc.3.bottom': '本轮结束：页面里没有输码界面',
-  'rc.3.balloon': '浏览器里没有检测到输码界面。',
-  'rc.5.status': '空闲（浏览器已关闭）',
-  'rc.5.bottom': '本轮结束：浏览器已关闭',
-  'rc.5.balloon': '已缩小到托盘，点我再打开。',
-  'rc.6.status': '已退出',
-  'rc.6.bottom': '本轮结束：程序已退出',
-  'rc.6.balloon': '',
-  'rc.1.status': '出错了：没跑起来',
-  'rc.1.bottom': '本轮结束：环境有问题（没找到浏览器 / 超时）',
-  'rc.7.status': '已用默认浏览器打开',
-  'rc.7.bottom': '登录码 %s 已复制到剪贴板，请在网页里粘贴输入',
-  'rc.7.balloon': '默认浏览器不是 Chromium 系，已打开网页；登录码 %s 已复制',
-  'rc.1.balloon': '没跑起来 —— 找不到浏览器或超时了，看日志。',
   'rc.4.status': '没登上去',
   'rc.4.bottom': '本轮结束：还没有登录凭据，需要你手动登一次',
-  'rc.4.balloon': '还没有登录凭据。手动登一次米家极客版就行了。',
+  'rc.5.status': '空闲（浏览器已关闭）',
+  'rc.5.bottom': '本轮结束：浏览器已关闭',
+  'rc.6.status': '已退出',
+  'rc.6.bottom': '本轮结束：程序已退出',
+  'rc.7.status': '已用默认浏览器打开',
+  'rc.7.bottom': '登录码 %s 已复制到剪贴板，请在网页里粘贴输入',
   'rc.8.status': '小米登录已过期',
   'rc.8.bottom': '本轮结束：登录过期 —— 点面板「重新登录」即可修好',
   'rc.x.status': '空闲',
   'rc.x.bottom': '本轮结束：未知结果（rc=%s）',
-  'rc.x.balloon': '这轮的结果我没看懂（rc=%s），看日志吧。',
-  'st.relogin_confirm': '现在会打开小米账号登录页，请你在浏览器里\n用小米账号登录一次。\n\n登录成功后新凭据会替换旧的，程序自动接着用；\n这个过程不会动你的设置和登录次数统计。\n\n确定现在重新登录吗？',
+  'st.relogin_confirm':
+      '现在会打开小米账号登录页，请你在浏览器里\n用小米账号登录一次。\n\n登录成功后新凭据会替换旧的，程序自动接着用；\n这个过程不会动你的设置和登录次数统计。\n\n确定现在重新登录吗？',
   'st.relogin_ing': '正在等你登录…',
   'st.relogin_ing.bottom': '请在浏览器窗口里登录，登录成功后自动继续',
   'st.relogin_ok': '✓ 已重新登录',
@@ -132,39 +97,26 @@ const Map<String, String> _zhTable = {
   'st.relogin_savefail.bottom': '本会话先用新凭据自动顶上；重启后需再登一次（查数据目录权限）',
   'st.relogin_nobrowser': '重新登录需要浏览器',
   'st.relogin_nobrowser.bottom': '找不到可用的浏览器，登录页打不开',
-  'why.nocreds': '本机还没有保存小米登录信息',
-  'why.stale': '小米登录已过期，需要重新登录',
-  'why.network': '连不上小米服务器（网络问题，不是登录过期）',
-  'why.relogintimeout': '等待超时，或浏览器被关掉了',
-  'why.reloginfail': '登录过程出错了，看日志',
   'dlg.relogin.title': 'EzMiGeek · 重新登录小米账号',
   'dlg.relogin.needchromium.title': 'EzMiGeek · 重新登录',
-  'dlg.relogin.needchromium.text': '重新登录需要读浏览器的登录信息，只有 Edge / Chrome 这类浏览器支持。\n\n你当前的默认浏览器是：\n%s\n\n请把系统默认浏览器改成 Edge 或 Chrome，再点一次「重新登录」。',
-  'bl.title.settings': 'EzMiGeek · 设置',
-  'bl.title.legal': 'EzMiGeek · 免责声明',
-  'bl.hidden': '面板已收起，助手仍在待命。点托盘图标或任务栏图标都能叫回来。',
-  'bl.to_tray': '已收进托盘，助手仍在待命。',
-  'bl.nobrowser': '浏览器当前没有开着。',
-  'bl.saved': '已保存，重启后仍是这些值。\n开机自动启动：%s',
-  'bl.on': '开',
-  'bl.off': '关',
-  'bl.autostart_bad': '开机自启没设成（%s）',
-  'bl.savefail': '保存失败：%s',
-  'bl.relogin_ok': '小米账号已重新登录，凭据已更新。',
-  'bl.stale': '小米登录过期了，程序暂时取不到登录码。\n点面板上的「重新登录」重新登一次就好。',
+  'dlg.relogin.needchromium.text':
+      '重新登录需要读浏览器的登录信息，只有 Edge / Chrome 这类浏览器支持。\n\n你当前的默认浏览器是：\n%s\n\n请安装或将系统默认浏览器设为 Edge / Chrome，再点一次「重新登录」。',
   'page.manual': '自动补码连续失败，请手动输入登录码',
   'page.err': '自动补码失败：%s',
   'ob.title': 'EzMiGeek · 首次使用',
-  'ob.text': '接下来会打开小米账号登录页。\n\n请在弹出的浏览器窗口里用你的小米账号登录一次。\n登录成功后程序会自动继续，以后不用再登录。\n\n（浏览器窗口请保持打开，不要关掉）',
-  'err.perm': '没有写入权限（杀软或只读目录？）',
-  'err.nodir': '存放设置的目录不见了',
-  'err.nospace': '磁盘空间不够',
+  'ob.text':
+      '接下来会打开小米账号登录页。\n\n请在弹出的浏览器窗口里用你的小米账号登录一次。\n登录成功后程序会自动继续，以后不用再登录。\n\n（浏览器窗口请保持打开，不要关掉）',
   'menu.panel': '显示面板',
   'menu.open': '打开极客版',
   'menu.stop': '关闭本轮浏览器',
   'menu.logs': '打开日志文件夹',
   'menu.legal': '免责声明',
+  'menu.update': '检查更新',
   'menu.quit': '退出',
+  'upd.title': 'EzMiGeek · 检查更新',
+  'upd.latest': '当前已是最新版本（v%s）。',
+  'upd.found': '发现新版本 v%s（当前 v%s）。\n\n是否打开 GitHub 发布页查看并下载？',
+  'upd.fail': '检查更新失败：%s\n\n可手动前往 GitHub Releases 页面查看最新版本。',
 };
 
 const Map<String, String> _enTable = {
@@ -177,31 +129,6 @@ const Map<String, String> _enTable = {
   'btn.doc': 'User guide',
   'btn.log': 'View log',
   'c1.hint': 'See the user guide',
-  'card.clear': 'Clear data',
-  'card.clear.sub': 'Logs, shots, stats',
-  'card.clear.btn': 'Clear',
-  'card.reset': 'Reconfigure',
-  'card.reset.sub': 'Back to defaults',
-  'card.reset.btn': 'Reset',
-  'dlg.clear.title': 'EzMiGeek · Clear data',
-  'dlg.clear.li.logs': '  · Run logs       %d file(s) · %s',
-  'dlg.clear.li.shots': '  · Debug shots    %d file(s) · %s',
-  'dlg.clear.li.stats': '  · Login counter  %d login(s)',
-  'dlg.clear.li.cache': '  · Caches         %d file(s) · %s',
-  'dlg.clear.body': 'EzMiGeek data found on this machine:\n\n%s\n\nChoose:\n[Yes]    Only the above - keeps your login, no re-sign-in\n[No]     Also clears the login (Mi credential + browser data) - sign in again\n[Cancel] Do nothing\n\n(Small files are moved to a .bak-<timestamp> folder first - drag them back if you regret it)',
-  'dlg.reset.title': 'EzMiGeek · Reconfigure',
-  'dlg.reset.li.settings': '  · Settings -> back to factory defaults (language kept)',
-  'dlg.reset.li.auto': '  · Start with Windows -> turned off, registry entry removed',
-  'dlg.reset.li.legal': '  · Disclaimer -> shown again on the next launch',
-  'dlg.reset.body': 'EzMiGeek configuration to be reset:\n\n%s\n\n[OK]     Reset\n[Cancel] Do nothing\n\nCredential, logs and stats are untouched (to switch Mi account: use "Clear data" and pick [No]).',
-  'st.clearing': 'Clearing data…',
-  'st.resetting': 'Resetting…',
-  'info.cleared': 'Data cleared (files backed up)',
-  'info.reset': 'Reset to defaults (language kept)',
-  'info.cleared.part': 'Data cleared (%d item(s) left)',
-  'info.reset.part': 'Reset done (%d item(s) failed)',
-  'info.clearfail': 'Clear failed: %s',
-  'info.resetfail': 'Reset failed: %s',
   'info.busyblock': 'A round is running - try again after',
   'lab.total': 'Total logins',
   'lab.today': 'Logins today',
@@ -209,10 +136,11 @@ const Map<String, String> _enTable = {
   'sub.last.dur': 'Last success: %s · took %.0f s',
   'sub.never': 'No success yet',
   'bottom.idle': 'Click the button above to open Mi Geek; the code fills in itself.',
-  'row.autostart': 'Start with Windows',
+  'row.autostart': 'Start at login',
   'as.on': 'Starts with Windows',
-  'as.elsewhere': 'Registry points elsewhere — toggle to fix',
-  'as.readfail': 'Cannot read registry (%s)',
+  'as.on.mac': 'Starts at macOS login',
+  'as.elsewhere': 'Autostart points elsewhere — toggle to fix',
+  'as.readfail': 'Cannot read autostart (%s)',
   'as.unknown': 'unknown reason',
   'row.relogin': 'Sign in to Mi account again',
   'row.relogin.sub': 'Use this when your sign-in has expired',
@@ -225,13 +153,13 @@ const Map<String, String> _enTable = {
   'row.code.loading': 'Fetching code…',
   'row.code.tap': 'Tap to copy · fetched %s',
   'row.code.fail': 'Fetch failed · tap to retry',
+  'row.code.needlogin': 'Not signed in · click Open Geek first',
   'row.code.copied': 'Copied to clipboard',
   'info.idle': 'Tip: the code lasts 5 min, then retries.',
   'info.savefail': 'Save failed: %s',
-  'info.credsavefail': 'Could not save the credential to disk (%s) — this round uses the in-memory copy',
-  'info.docmiss': 'Manual (使用说明.txt) not found',
+  'info.credsavefail':
+      'Could not save the credential to disk (%s) — this round uses the in-memory copy',
   'info.relogin_ok': 'Signed in again — credential updated',
-  'st.legal': 'Read the disclaimer…',
   'st.busy_round': 'Already running…',
   'st.kick': 'Starting a round…',
   'st.kick.bottom': 'Round started: opening Mi Geek…',
@@ -242,12 +170,9 @@ const Map<String, String> _enTable = {
   'st.error.bottom': 'The round ended with an error',
   'st.fetch': 'Fetching the code…',
   'st.fetch.bottom': 'Passcode page detected · attempt %d this round',
-  'st.fetch.manual': 'Waiting for a page…',
   'st.fill': 'Filling in the code…',
   'st.ok': '✓ Logged in',
   'st.ok.bottom': 'Succeeded %d time(s) · took %.0f s',
-  'st.manual': 'Please type the code',
-  'st.manual.bottom': 'Failed %d times in a row — handing over to you',
   'st.paused': 'Handed to you — auto-fill paused',
   'st.paused.bottom': 'Type the code yourself, or click "Open Geek" to resume',
   'st.manualok': '✓ Signed in (typed by hand)',
@@ -258,31 +183,24 @@ const Map<String, String> _enTable = {
   'st.busyrelogin.bottom': 'Try again after it finishes',
   'rc.0.status': 'Idle',
   'rc.0.bottom': 'Round over: done, standing by',
-  'rc.0.balloon': 'That round finished.',
+  'rc.1.status': 'Error: could not start',
+  'rc.1.bottom': 'Round over: environment problem (no hub / browser / timeout)',
   'rc.3.status': 'Idle (no code page)',
   'rc.3.bottom': 'Round over: no passcode page found',
-  'rc.3.balloon': 'No passcode page in the browser.',
-  'rc.5.status': 'Idle (browser closed)',
-  'rc.5.bottom': 'Round over: browser closed',
-  'rc.5.balloon': 'Minimised to tray — click me to reopen.',
-  'rc.6.status': 'Exited',
-  'rc.6.bottom': 'Round over: the app exited',
-  'rc.6.balloon': '',
-  'rc.1.status': 'Error: could not start',
-  'rc.1.bottom': 'Round over: environment problem (no browser / timeout)',
-  'rc.1.balloon': 'Could not start — no browser found, or it timed out. See the log.',
-  'rc.7.status': 'Opened in browser',
-  'rc.7.bottom': 'Code %s copied to the clipboard — paste it into the page',
-  'rc.7.balloon': 'Default browser is not Chromium-based — page opened; code %s copied',
   'rc.4.status': 'Not signed in',
   'rc.4.bottom': 'Round over: no credential yet — sign in once by hand',
-  'rc.4.balloon': 'No login credential yet. Sign in to Mi Geek once by hand.',
+  'rc.5.status': 'Idle (browser closed)',
+  'rc.5.bottom': 'Round over: browser closed',
+  'rc.6.status': 'Exited',
+  'rc.6.bottom': 'Round over: the app exited',
+  'rc.7.status': 'Opened in browser',
+  'rc.7.bottom': 'Code %s copied to the clipboard — paste it into the page',
   'rc.8.status': 'Mi sign-in expired',
   'rc.8.bottom': 'Round over: sign-in expired - click "Sign in" on the panel',
   'rc.x.status': 'Idle',
   'rc.x.bottom': 'Round over: unknown result (rc=%s)',
-  'rc.x.balloon': 'I couldn\'t read that round\'s result (rc=%s) — see the log.',
-  'st.relogin_confirm': 'The Xiaomi account sign-in page will open now — please\nsign in with your Xiaomi account in the browser.\n\nThe new credential replaces the old one and the app carries\non by itself. Your settings and login count are untouched.\n\nSign in again now?',
+  'st.relogin_confirm':
+      'The Xiaomi account sign-in page will open now — please\nsign in with your Xiaomi account in the browser.\n\nThe new credential replaces the old one and the app carries\non by itself. Your settings and login count are untouched.\n\nSign in again now?',
   'st.relogin_ing': 'Waiting for sign-in…',
   'st.relogin_ing.bottom': 'Please sign in in the browser; it continues by itself',
   'st.relogin_ok': '✓ Signed in again',
@@ -290,43 +208,37 @@ const Map<String, String> _enTable = {
   'st.relogin_fail': 'Login failed: %s',
   'st.relogin_fail.bottom': 'Not signed in — you can click "Sign in" again',
   'st.relogin_savefail': 'Signed in, but the credential could not be saved',
-  'st.relogin_savefail.bottom': 'This session keeps using it; after a restart sign in once more (check folder permissions)',
+  'st.relogin_savefail.bottom':
+      'This session keeps using it; after a restart sign in once more (check folder permissions)',
   'st.relogin_nobrowser': 'Needs a browser',
   'st.relogin_nobrowser.bottom': 'No usable browser found — the page cannot open',
-  'why.nocreds': 'No Xiaomi credential stored on this PC yet',
-  'why.stale': 'Mi sign-in expired — please sign in again',
-  'why.network': 'Cannot reach Xiaomi servers (network, not expiry)',
-  'why.relogintimeout': 'Timed out, or the browser window was closed',
-  'why.reloginfail': 'Something went wrong during sign-in — see the log',
   'dlg.relogin.title': 'EzMiGeek · Sign in to Mi account again',
   'dlg.relogin.needchromium.title': 'EzMiGeek · Sign in again',
-  'dlg.relogin.needchromium.text': 'Signing in again needs to read the browser\'s login data, which only Edge / Chrome support.\n\nYour current default browser is:\n%s\n\nPlease set Edge or Chrome as the system default browser, then click "Sign in" again.',
-  'bl.title.settings': 'EzMiGeek · Settings',
-  'bl.title.legal': 'EzMiGeek · Disclaimer',
-  'bl.hidden': 'Panel hidden, helper still standing by. Click the tray or taskbar icon.',
-  'bl.to_tray': 'Minimised to tray; the helper is still standing by.',
-  'bl.nobrowser': 'The browser is not open right now.',
-  'bl.saved': 'Saved — these values persist across restarts.\nStart with Windows: %s',
-  'bl.on': 'on',
-  'bl.off': 'off',
-  'bl.autostart_bad': 'Start with Windows not set (%s)',
-  'bl.savefail': 'Save failed: %s',
-  'bl.relogin_ok': 'Signed in to Mi account again — credential updated.',
-  'bl.stale': 'Your Mi sign-in expired, so codes cannot be fetched.\nClick "Sign in" on the panel to fix it.',
+  'dlg.relogin.needchromium.text':
+      'Signing in again needs to read the browser\'s login data, which only Edge / Chrome support.\n\nYour current default browser is:\n%s\n\nPlease install or set Edge / Chrome as default, then click "Sign in" again.',
   'page.manual': 'Auto-fill failed repeatedly — please type the code yourself',
   'page.err': 'Auto-fill failed: %s',
   'ob.title': 'EzMiGeek · First run',
-  'ob.text': 'The Xiaomi account sign-in page will open next.\n\nPlease sign in with your Xiaomi account in the browser window.\nThe app continues by itself once you are in — only this once.\n\n(Keep that browser window open — do not close it)',
-  'err.perm': 'No write permission (read-only folder?)',
-  'err.nodir': 'The settings folder is gone',
-  'err.nospace': 'Not enough disk space',
+  'ob.text':
+      'The Xiaomi account sign-in page will open next.\n\nPlease sign in with your Xiaomi account in the browser window.\nThe app continues by itself once you are in — only this once.\n\n(Keep that browser window open — do not close it)',
   'menu.panel': 'Show panel',
   'menu.open': 'Open Mi Geek',
   'menu.stop': 'Close this browser',
   'menu.logs': 'Open log folder',
   'menu.legal': 'Disclaimer',
+  'menu.update': 'Check for updates',
   'menu.quit': 'Quit',
+  'upd.title': 'EzMiGeek · Check for updates',
+  'upd.latest': 'You are already on the latest version (v%s).',
+  'upd.found':
+      'New version v%s is available (current: v%s).\n\nOpen the GitHub release page to download?',
+  'upd.fail':
+      'Update check failed: %s\n\nYou can visit the GitHub Releases page manually.',
 };
+
+/// 导出给单测锁定中英字表 1:1 键对称。
+Iterable<String> get i18nZhKeys => _zhTable.keys;
+Iterable<String> get i18nEnKeys => _enTable.keys;
 
 abstract final class Lang {
   static String get current => _lang;
@@ -334,11 +246,10 @@ abstract final class Lang {
 
   static void set(String v) => _lang = (v == 'en') ? 'en' : 'zh';
 
-  /// Python `template % args` 的等价物：按顺序消费 %s / %d / %.0f（四舍五入
-  /// 取整），`%%` 转义成字面 %。字表里有 %.0f 的模板（用时秒数），必须全认。
+  /// Python `template % args` 的等价物：按顺序消费 %s / %d / %.0f，`%%` 转义成字面 %。
   static String fmt(String template, List<Object?> args) {
     final out = StringBuffer();
-    var i = 0; // 下一个待消费的实参下标
+    var i = 0;
     for (var p = 0; p < template.length; p++) {
       final ch = template[p];
       if (ch != '%') {
@@ -350,17 +261,17 @@ abstract final class Lang {
         p++;
         continue;
       }
-      // %[.N]f / %[.N]d / %s —— Python 老式格式，逐个吃掉一个实参。
       final m = RegExp(r'^%(\.\d+)?[sdf]').firstMatch(template.substring(p));
       if (m == null) {
-        out.write(ch); // 未知格式：原样保留（漏译/错模板一眼可见）
+        out.write(ch);
         continue;
       }
       final spec = m.group(0)!;
       final a = i < args.length ? args[i++] : '';
       if (spec.endsWith('f')) {
         final prec = m.group(1);
-        final digits = prec == null ? 6 : (int.tryParse(prec.substring(1)) ?? 0);
+        final digits =
+            prec == null ? 6 : (int.tryParse(prec.substring(1)) ?? 0);
         final v = double.tryParse('$a') ?? 0.0;
         out.write(v.toStringAsFixed(digits));
       } else if (spec.endsWith('d')) {
@@ -373,14 +284,17 @@ abstract final class Lang {
     return out.toString();
   }
 
-  /// 中文「今天 HH:MM」/ 别的日子「M月d日 HH:MM」；英文 Today / %b %d。
+  /// 中文「今天 HH:MM」/ 别的日子「MM月dd日 HH:MM」；英文 Today / Mon dd。
   static String fmtTime(DateTime dt, bool isToday) {
     String two(int v) => v.toString().padLeft(2, '0');
     final hm = '${two(dt.hour)}:${two(dt.minute)}';
     if (zh) {
       return isToday ? '今天 $hm' : '${two(dt.month)}月${two(dt.day)}日 $hm';
     }
-    const mon = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const mon = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    ];
     return isToday ? 'Today $hm' : '${mon[dt.month - 1]} ${two(dt.day)}, $hm';
   }
 }

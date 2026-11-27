@@ -5,6 +5,7 @@
 // 调色板 / 字号 / 卡片材质 / 命中逻辑与 ui.py / renderer.py / icons.py 逐值一致。
 library;
 
+import 'dart:io' show Platform;
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
@@ -139,12 +140,15 @@ abstract final class Geo {
 
 // ============================================================ 字号（renderer.py 字体表，像素）
 abstract final class EzFont {
-  static const String family = 'Microsoft YaHei UI';
+  static String get family =>
+      Platform.isWindows ? 'Microsoft YaHei UI' : 'PingFang SC';
 
-  /// YaHei 缺 Dingbat 字形（✓ 等）时落 Segoe UI Symbol。
-  /// 真机 DirectWrite 本来就会系统级兜底，显式声明同效，且让金样
-  /// 出图（无系统 fallback 的测试环境）也能出对勾。
-  static const List<String> fallback = ['Segoe UI Symbol'];
+  /// 跨平台兜底字体：Windows 兜 Segoe UI Symbol，macOS 兜 PingFang SC / Hiragino Sans GB。
+  static const List<String> fallback = [
+    'PingFang SC',
+    'Hiragino Sans GB',
+    'Segoe UI Symbol',
+  ];
 
   static TextStyle f(double px, {bool bold = false, Color? color}) => TextStyle(
       fontFamily: family,

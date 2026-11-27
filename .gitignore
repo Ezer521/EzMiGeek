@@ -69,5 +69,3 @@ stats.json
 *.token
 profile/
 logs/
-# 跨平台平台目录：本仓库只分发 Windows 源码（本地保留 macos/ 供 Mac 版构建，不入库）
-macos/

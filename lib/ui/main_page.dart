@@ -1,6 +1,4 @@
-// main_page.dart —— 主页面：窗口 = 玻璃外壳（1043×1586 设计画布，逐值移植）。
-// 交互走 Hit 同款命中表；拖拽/三钮/悬停与原版一致；
-// 背景为假毛玻璃（烤进窗口的极光，替代真实桌面透视）。
+// main_page.dart —— 主页面：窗口 = 玻璃外壳（1043×1586 设计画布）。
 library;
 
 import 'package:flutter/material.dart';
@@ -8,6 +6,7 @@ import 'package:window_manager/window_manager.dart';
 
 import '../state/app_state.dart';
 import 'ezshell.dart' show EzShell, windowClose, windowMaxToggle, windowMin;
+import 'window_fit.dart' show resetWindowSize;
 
 class MainPage extends StatefulWidget {
   const MainPage({super.key, required this.state});
@@ -23,13 +22,8 @@ class _MainPageState extends State<MainPage> {
   void initState() {
     super.initState();
     windowMin = windowManager.minimize;
-    windowMaxToggle = () async {
-      if (await windowManager.isMaximized()) {
-        await windowManager.unmaximize();
-      } else {
-        await windowManager.maximize();
-      }
-    };
+    // 窗口已锁定最佳等比上限，中钮作为「复位到最佳贴合尺寸」使用。
+    windowMaxToggle = resetWindowSize;
     windowClose = windowManager.close;
   }
 

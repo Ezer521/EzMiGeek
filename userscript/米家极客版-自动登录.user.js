@@ -1,8 +1,14 @@
 // ==UserScript==
 // @name         米家极客版 · 自动登录
-// @namespace    mijia-geek-auto-login
-// @version      3.0.6
+// @namespace    https://github.com/Ezer521/EzMiGeek
+// @version      3.1.0
+// @description  米家自动化极客版自动取码填码登录，换中枢硬件自动识别，断连自动补码，登录过期常驻可重登。
 // @author       |Ezer|
+// @license      MIT
+// @homepageURL  https://github.com/Ezer521/EzMiGeek
+// @supportURL   https://github.com/Ezer521/EzMiGeek/issues
+// @downloadURL  https://github.com/Ezer521/EzMiGeek/releases/latest/download/EzMiGeek-script.user.js
+// @updateURL    https://github.com/Ezer521/EzMiGeek/releases/latest/download/EzMiGeek-script.user.js
 // @include      /^https?:\/\/(192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})(:\d{1,5})?\//
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
@@ -640,13 +646,13 @@
     for (var i = 0; i < ns.length; i++) {
       if ((ns[i].innerText || '').replace(/\s/g, '') === ch) {
         var el = ns[i];
-        ['pointerdown', 'mousedown', 'pointerup', 'mouseup'].forEach(function (t) {
+        /* 与桌面端 agent.js 一致：事件序列已含 click，不再补 el.click() 防止单数字双击。 */
+        ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(function (t) {
           var Ev = t.indexOf('pointer') === 0 ? (window.PointerEvent || MouseEvent) : MouseEvent;
           try {
             el.dispatchEvent(new Ev(t, { bubbles: true, cancelable: true, view: window, button: 0 }));
           } catch (e) {}
         });
-        try { el.click(); } catch (e) {}
         return true;
       }
     }
@@ -1004,10 +1010,12 @@
 
   function boot() {
     if (!document.body) return setTimeout(boot, 200);
-    purgeLegacyCfg();          // ★ 清掉旧版遗留在 localStorage/GM 里的凭据
-    removeOldVersionUI();
-
-    //   （每 500ms 查一次），确认是极客版才启动；超时仍不是 → 静默退出。
+    // 先确认是极客版页面再执行清理与挂载，避免对局域网内其他网页（NAS/路由器等）
+    // 产生额外 DOM 轮询或误删页面元素。
+    if (isGeekPage()) {
+      startCore();
+      return;
+    }
     var waited = 0;
     var identify = setInterval(function () {
       waited += 500;
@@ -1017,16 +1025,18 @@
   }
 
   function startCore() {
+    purgeLegacyCfg();          // ★ 确认是极客版后再清旧版遗留存储与界面
+    removeOldVersionUI();
     try {                      // SHA-1 自检（标准向量 abc）
       var t = sha1Bytes(strToBytes('abc')), hx = '';
       for (var i = 0; i < 20; i++) hx += ('0' + t[i].toString(16)).slice(-2);
       if (hx !== 'a9993e364706816aba3e25717850c26c9cd0d89d')
         console.warn('[极客版自动登录] SHA-1 自检失败：', hx);
     } catch (e) {}
-    //   因为后面任何一步失败（取码失败、页面进不去）都得有地方可点。
+    // 常驻小圆点（默认静默不遮挡画面；悬停/点击圆点或 Ctrl+Alt+L 可呼出面板，
+    // 失败或登录过期时自动弹出面板提示）。
     buildDot();
     manualBind();
-    showUI(); // ★ Ezer 分发版：打开页面即亮出卡片（作者/使用说明/免责都在卡上）
     var tries = 0;
     var timer = setInterval(function () {
       tries++;
@@ -1045,19 +1055,17 @@
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
   else boot();
 
+  // 仅向页面暴露脱敏后的调试接口，绝不把内存中的 serviceToken / ssecurity 挂到全局 window。
   window.MGG = {
-    cfg: CFG, getPasscode: getPasscode, autoLogin: autoLogin, fillCode: fillCode,
+    prefs: function () { return { auto: !!CFG.auto, routerDid: CFG.routerDid || '' }; },
+    autoLogin: autoLogin,
     pinPad: pinPad, inputPad: inputPad, readyPad: readyPad,
-    refresh: refreshCred, mint: function () { return mintToken(CFG); },
-    findDevice: resolveDid, listDevices: listDevices,
-    show: showUI, hide: hideUI, alert: alertUI,
-    //   expired   当前是否判定为"登录态过期"（小圆点红不红就是它）
-    //   setExpired(v)  手动置位/清除（想自己试一下就调它）
-    //   mintNote  最近一次续期为什么没成（result=verify / no-json / 网络…）
+    refresh: refreshCred,
+    findDevice: resolveDid,
+    show: showUI, hide: hideUI,
     isExpired: function () { return expired; },
     setExpired: setExpired,
-    mintNote: function () { return lastMintNote; },
-    test: function () { return getPasscode().then(function (c) { console.log('取码成功', c); return c; }); }
+    mintNote: function () { return lastMintNote; }
   };
 
   // Ctrl+Alt+L 手动叫出/收起面板（平时主面板是藏着的，不会挡操作；

@@ -1,4 +1,4 @@
-// stats_store.dart —— 登录次数统计（app/stats.py 移植）。
+// stats_store.dart —— 登录次数统计。
 // 「一次成功」= 登录码被页面接受、输码界面消失的那一刻。
 library;
 
@@ -17,7 +17,16 @@ class Stats {
   static String _todayStr(DateTime d) =>
       '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
-  static Stats normalize(Object? raw) {
+  /// 跨天归零：程序长期常驻托盘时，次日展示和计数前自动清零今日计数。
+  void rolloverIfNeeded([DateTime? now]) {
+    final todayStr = _todayStr(now ?? DateTime.now());
+    if (day != todayStr) {
+      today = 0;
+      day = todayStr;
+    }
+  }
+
+  static Stats normalize(Object? raw, {DateTime? now}) {
     final s = Stats();
     if (raw is Map) {
       s.total = int.tryParse('${raw['Total']}') ?? 0;
@@ -29,45 +38,49 @@ class Stats {
       s.lastSecs = double.tryParse('${raw['LastSecs']}') ?? 0;
       if (s.lastSecs < 0) s.lastSecs = 0;
     }
-    // 跨天归零：读的时候比对日期（程序可能连开好几天）。
-    final today = _todayStr(DateTime.now());
-    if (s.day != today) {
-      s.today = 0;
-      s.day = today;
-    }
+    s.rolloverIfNeeded(now);
     return s;
   }
 
   static Stats load() {
     try {
       final f = File(statsPath());
-      if (!f.existsSync()) return Stats();
+      if (!f.existsSync()) return Stats()..rolloverIfNeeded();
       return Stats.normalize(jsonDecode(f.readAsStringSync()));
     } catch (_) {
-      return Stats();
+      return Stats()..rolloverIfNeeded();
     }
   }
 
-  Stats bump({double? secs}) {
+  Stats bump({double? secs, DateTime? now, bool persist = true}) {
+    final ts = now ?? DateTime.now();
+    rolloverIfNeeded(ts);
     total += 1;
     today += 1;
-    day = _todayStr(DateTime.now());
-    lastAt = DateTime.now().toIso8601String();
+    lastAt = ts.toIso8601String();
     if (secs != null && secs >= 0) lastSecs = secs;
-    save();
+    if (persist) save();
     return this;
   }
 
   void save() {
-    File(statsPath()).writeAsStringSync(
-        const JsonEncoder.withIndent('  ').convert({
-          'Total': total,
-          'Day': day,
-          'Today': today,
-          'LastAt': lastAt,
-          'LastSecs': lastSecs,
-        }),
-        flush: true);
+    final p = statsPath();
+    final tmp = '$p.tmp';
+    final content = const JsonEncoder.withIndent('  ').convert({
+      'Total': total,
+      'Day': day,
+      'Today': today,
+      'LastAt': lastAt,
+      'LastSecs': lastSecs,
+    });
+    File(tmp).writeAsStringSync(content, flush: true);
+    try {
+      File(tmp).renameSync(p);
+    } catch (_) {
+      final main = File(p);
+      if (main.existsSync()) main.deleteSync();
+      File(tmp).renameSync(p);
+    }
   }
 
   DateTime? get lastAtDateTime => DateTime.tryParse(lastAt);

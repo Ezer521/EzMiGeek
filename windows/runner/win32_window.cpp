@@ -179,65 +179,6 @@ Win32Window::MessageHandler(HWND hwnd,
                             WPARAM const wparam,
                             LPARAM const lparam) noexcept {
   switch (message) {
-    case WM_SIZING: {
-      // 拖边等比缩放（Ez 家族约定）：保持设计比例 1043:1586，最小 0.42 倍。
-      auto rect = reinterpret_cast<RECT*>(lparam);
-      const double aspect = 1586.0 / 1043.0;
-      const UINT dpi = GetDpiForWindow(hwnd);
-      const double scale = dpi / 96.0;
-      LONG minW = static_cast<LONG>(438.0 * scale);
-      LONG w = rect->right - rect->left;
-      if (w < minW) {
-        w = minW;
-      }
-      LONG h = static_cast<LONG>(w * aspect + 0.5);
-      switch (static_cast<int>(wparam)) {
-        case 1:  // LEFT
-          rect->left = rect->right - w;
-          rect->top = rect->bottom - h;
-          break;
-        case 2:  // RIGHT
-          rect->right = rect->left + w;
-          rect->top = rect->bottom - h;
-          break;
-        case 3:  // TOP
-        case 6:  // BOTTOM
-        {
-          const LONG cx = (rect->left + rect->right) / 2;
-          w = static_cast<LONG>(h / aspect + 0.5);
-          if (w < minW) {
-            w = minW;
-            h = static_cast<LONG>(w * aspect + 0.5);
-          }
-          rect->left = cx - w / 2;
-          rect->right = rect->left + w;
-          if (static_cast<int>(wparam) == 3) {
-            rect->top = rect->bottom - h;
-          } else {
-            rect->bottom = rect->top + h;
-          }
-          break;
-        }
-        case 4:  // TOPLEFT
-          rect->left = rect->right - w;
-          rect->top = rect->bottom - h;
-          break;
-        case 5:  // TOPRIGHT
-          rect->right = rect->left + w;
-          rect->top = rect->bottom - h;
-          break;
-        case 7:  // BOTTOMLEFT
-          rect->left = rect->right - w;
-          rect->bottom = rect->top + h;
-          break;
-        case 8:  // BOTTOMRIGHT
-          rect->right = rect->left + w;
-          rect->bottom = rect->top + h;
-          break;
-      }
-      return TRUE;
-    }
-
     case WM_DESTROY:
       window_handle_ = nullptr;
       Destroy();

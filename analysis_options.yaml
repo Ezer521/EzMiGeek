@@ -14,9 +14,6 @@ analyzer:
     - build/**
     - windows/**
     - macos/**
-    # 中枢 WS 协议调查的半成品探针（2026-10-06，引用的三个文件还没落地，
-    # 无任何入口引用、不参与编译）。等它补齐后从这份名单里摘掉。
-    - lib/probe/ws_probe.dart
     - _backup/**
 
 linter:

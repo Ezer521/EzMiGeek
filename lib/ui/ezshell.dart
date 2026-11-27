@@ -3,12 +3,14 @@
 // 上面白纱玻璃罩 + 全部控件，绘制顺序 / 材质 / 字号 / 命中与 Python 版逐值一致。
 library;
 
+import 'dart:io' show Platform;
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/gestures.dart' show kPrimaryButton;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
+import 'package:window_manager/window_manager.dart';
 
 import '../core/ezui.dart';
 import '../native/win32.dart'
@@ -38,18 +40,34 @@ class EzShell extends StatefulWidget {
 
 class _EzShellState extends State<EzShell> {
   EzHit _hover = EzHit.none;
-
-  double get _scale => _size.width / Geo.dw;
   Size _size = Size.zero;
+
+  (double, double, double) _layoutTransform(Size size) {
+    var scale = size.width / Geo.dw;
+    var yOff = (size.height - Geo.dh * scale) / 2;
+    if (EzShellPainter.fitWhole && yOff < 0) {
+      scale = size.height / Geo.dh;
+      yOff = 0;
+    }
+    final xOff = (size.width - Geo.dw * scale) / 2;
+    return (scale, xOff, yOff);
+  }
 
   Offset _toDesign(Offset local) {
     if (_size == Size.zero) return local;
-    final xOff = (_size.width - Geo.dw * _scale) / 2;
-    final yOff = (_size.height - Geo.dh * _scale) / 2;
-    return Offset((local.dx - xOff) / _scale, (local.dy - yOff) / _scale);
+    final (scale, xOff, yOff) = _layoutTransform(_size);
+    return Offset((local.dx - xOff) / scale, (local.dy - yOff) / scale);
+  }
+
+  bool _isHitInteractive(EzHit hit) {
+    if (hit == EzHit.none) return false;
+    if (hit == EzHit.main && !widget.state.ui.canAct) return false;
+    if (hit == EzHit.relogin && !widget.state.ui.row5Act) return false;
+    return true;
   }
 
   void _dispatchTap(EzHit hit) {
+    if (!_isHitInteractive(hit)) return;
     final s = widget.state;
     switch (hit) {
       case EzHit.main: s.onOpenGeekClicked();
@@ -72,6 +90,7 @@ class _EzShellState extends State<EzShell> {
 
   @override
   Widget build(BuildContext context) {
+    final activeHover = _isHitInteractive(_hover) ? _hover : EzHit.none;
     return MouseRegion(
       onHover: (e) {
         final d = _toDesign(e.localPosition);
@@ -81,15 +100,19 @@ class _EzShellState extends State<EzShell> {
       onExit: (_) {
         if (_hover != EzHit.none) setState(() => _hover = EzHit.none);
       },
-      cursor: _hover == EzHit.none ? MouseCursor.defer : SystemMouseCursors.click,
+      cursor: activeHover == EzHit.none ? MouseCursor.defer : SystemMouseCursors.click,
       child: Listener(
         onPointerDown: (e) {
-          // 非控件区按下左键 ⇒ 开始拖窗口。走 Win32 原生通道
-          //（ReleaseCapture + WM_NCLBUTTONDOWN/HTCAPTION）：拖动循环由系统接管，
-          // 窗口 hide/收回时系统强制退出循环并释放捕获 —— 结构上不可能卡死鼠标。
+          // 非控件区按下左键 ⇒ 拖动窗口：
+          //   · Windows 走原生 Win32 ReleaseCapture + HTCAPTION（零卡鼠）；
+          //   · macOS 走 window_manager.startDragging()。
           if (e.buttons != kPrimaryButton) return;
           final hit = ezHit(_toDesign(e.localPosition).dx, _toDesign(e.localPosition).dy);
           if (hit != EzHit.none) return;
+          if (!Platform.isWindows) {
+            windowManager.startDragging();
+            return;
+          }
           final hwnd = findMainWindow();
           if (hwnd == 0) return;
           releaseCapture();
@@ -103,7 +126,7 @@ class _EzShellState extends State<EzShell> {
             _size = Size(cons.maxWidth, cons.maxHeight);
             return CustomPaint(
               size: Size.infinite,
-              painter: EzShellPainter(state: widget.state, hover: _hover),
+              painter: EzShellPainter(state: widget.state, hover: activeHover),
             );
           }),
         ),
@@ -146,8 +169,9 @@ class EzShellPainter extends CustomPainter {
       scale = size.height / Geo.dh;
       yOff = 0;
     }
+    final xOff = (size.width - Geo.dw * scale) / 2;
     c.save();
-    c.translate(0, yOff);
+    c.translate(xOff, yOff);
     c.scale(scale);
     _glassCover(c);
     _titleBar(c);

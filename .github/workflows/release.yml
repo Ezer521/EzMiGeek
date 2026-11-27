@@ -1,0 +1,207 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "版本号标签（如 v3.1.0）"
+        required: true
+        type: string
+      publish_release:
+        description: "是否发布到 GitHub Release（false=仅试编并上传 Artifacts 供下载验证）"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  meta:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      version: ${{ steps.resolve.outputs.version }}
+      should_publish: ${{ steps.resolve.outputs.should_publish }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve and validate version consistency
+        id: resolve
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+            SHOULD_PUBLISH="${{ inputs.publish_release }}"
+          else
+            TAG="${{ github.ref_name }}"
+            SHOULD_PUBLISH="true"
+          fi
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Tag 必须形如 v3.1.0，当前：$TAG" >&2
+            exit 1
+          fi
+          VER="${TAG#v}"
+          if ! grep -Eq "^version:[[:space:]]*${VER}(\+[0-9]+)?[[:space:]]*$" pubspec.yaml; then
+            echo "pubspec.yaml 版本与 tag $TAG 不一致" >&2
+            exit 1
+          fi
+          if ! grep -Eq "^//[[:space:]]*@version[[:space:]]+${VER}[[:space:]]*$" "userscript/米家极客版-自动登录.user.js"; then
+            echo "油猴脚本 @version 与 tag $TAG 不一致" >&2
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          echo "should_publish=$SHOULD_PUBLISH" >> "$GITHUB_OUTPUT"
+          echo "版本一致性校验通过：$TAG"
+
+  build-windows:
+    needs: meta
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: "stable"
+          cache: true
+
+      - name: Install, Analyze & Test
+        run: |
+          flutter pub get
+          flutter analyze
+          flutter test
+
+      - name: Build Windows Release
+        run: flutter build windows --release --dart-define=APP_VERSION=${{ needs.meta.outputs.version }}
+
+      - name: Package Windows zip & userscript
+        shell: pwsh
+        run: |
+          $ver = "${{ needs.meta.outputs.version }}"
+          $dist = "dist"
+          $stage = "$dist\EzMiGeek-win64-v$ver"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item -Recurse -Force "build\windows\x64\runner\Release\*" $stage
+          Copy-Item -Force "LICENSE" "$stage\LICENSE.txt"
+          Copy-Item -Force "README.md" "$stage\README.md"
+          Copy-Item -Force "assets\使用说明.txt" "$stage\使用说明.txt"
+          Compress-Archive -Path "$stage\*" -DestinationPath "$dist\EzMiGeek-win64-v$ver.zip" -Force
+          Copy-Item -Force "userscript\米家极客版-自动登录.user.js" "$dist\EzMiGeek-script.user.js"
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: |
+            dist/EzMiGeek-win64-v*.zip
+            dist/EzMiGeek-script.user.js
+
+  build-macos:
+    needs: meta
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: "stable"
+          cache: true
+
+      - name: Install, Analyze & Test
+        run: |
+          flutter pub get
+          flutter analyze
+          flutter test
+
+      - name: Build macOS Release
+        run: flutter build macos --release --dart-define=APP_VERSION=${{ needs.meta.outputs.version }}
+
+      - name: Package macOS zip (preserving .app bundle symlinks via ditto)
+        shell: bash
+        run: |
+          set -euo pipefail
+          VER="${{ needs.meta.outputs.version }}"
+          STAGE="dist/EzMiGeek-macos-v${VER}"
+          mkdir -p "$STAGE"
+          APP_SRC=$(find build/macos/Build/Products/Release -maxdepth 1 -name "*.app" | head -n 1)
+          if [ -z "$APP_SRC" ]; then
+            echo "未找到编译产出的 .app 包" >&2
+            exit 1
+          fi
+          ditto "$APP_SRC" "$STAGE/EzMiGeek.app"
+          cp LICENSE "$STAGE/LICENSE.txt"
+          cp README.md "$STAGE/README.md"
+          cp "assets/使用说明.txt" "$STAGE/使用说明.txt"
+          # 必须使用 ditto 压缩以完整保留 .app 内部的 Framework 符号链接与可执行权限
+          ditto -c -k --sequesterRsrc --keepParent "$STAGE" "dist/EzMiGeek-macos-arm64-v${VER}.zip"
+          ls -lh "dist/EzMiGeek-macos-arm64-v${VER}.zip"
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-macos
+          path: dist/EzMiGeek-macos-arm64-v*.zip
+
+  publish:
+    needs: [meta, build-windows, build-macos]
+    if: needs.meta.outputs.should_publish == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-windows
+          path: release_files
+
+      - name: Download macOS artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: release-macos
+          path: release_files
+
+      - name: Generate unified SHA256SUMS.txt
+        shell: bash
+        run: |
+          cd release_files
+          sha256sum EzMiGeek-*.zip EzMiGeek-script.user.js > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Generate build provenance attestation
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            release_files/EzMiGeek-*.zip
+            release_files/EzMiGeek-script.user.js
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.meta.outputs.tag }}
+          name: EzMiGeek ${{ needs.meta.outputs.tag }}
+          generate_release_notes: true
+          files: |
+            release_files/EzMiGeek-win64-v*.zip
+            release_files/EzMiGeek-macos-arm64-v*.zip
+            release_files/EzMiGeek-script.user.js
+            release_files/SHA256SUMS.txt

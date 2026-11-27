@@ -23,27 +23,61 @@ const int geekPort = 8086;
 /// 浏览器地址栏不带端口能打开，装了软件反而找不到）。
 const List<int> geekPorts = [8086, 80];
 
-String _cachePath() => '${dataDir()}\\.lan-hub-cache.json';
+String _cachePath() => pJoin(dataDir(), '.lan-hub-cache.json');
 
-/// 读本机默认网关（route print 的 0.0.0.0 行最稳，不受系统语言影响；
-/// 失败退回 ipconfig 的默认网关行，中英双匹配）。
-String? defaultGateway() {
-  String run(String exe, List<String> args) {
+/// 解析 macOS `route -n get default` 输出里的 gateway IP（导出便于单测）。
+String? parseMacRouteGateway(String output) {
+  for (final line in output.split('\n')) {
+    final trimmed = line.trim();
+    if (trimmed.toLowerCase().startsWith('gateway:')) {
+      final ip = trimmed.substring('gateway:'.length).trim();
+      if (RegExp(r'^\d+\.\d+\.\d+\.\d+$').hasMatch(ip) && ip != '127.0.0.1') {
+        return ip;
+      }
+    }
+  }
+  return null;
+}
+
+/// 读本机默认网关：
+///   · Windows：`route print 0.0.0.0` → 兜底 `ipconfig`；
+///   · macOS：`/sbin/route -n get default` → 兜底 `/usr/sbin/netstat -rn -f inet`。
+Future<String?> defaultGateway() async {
+  Future<String> run(String exe, List<String> args) async {
     try {
-      final r = Process.runSync(exe, args,
-          stdoutEncoding: const SystemEncoding(),
-          stderrEncoding: const SystemEncoding());
+      final r = await Process.run(
+        exe,
+        args,
+        stdoutEncoding: const SystemEncoding(),
+        stderrEncoding: const SystemEncoding(),
+      ).timeout(const Duration(seconds: 4));
       return r.exitCode == 0 ? r.stdout.toString() : '';
     } catch (_) {
       return '';
     }
   }
 
-  // 方法 1：route print
-  final out = run('route', ['print', '0.0.0.0']);
+  if (!Platform.isWindows) {
+    final out = await run('/sbin/route', ['-n', 'get', 'default']);
+    final gw = parseMacRouteGateway(out);
+    if (gw != null) return gw;
+    final ns = await run('/usr/sbin/netstat', ['-rn', '-f', 'inet']);
+    for (final line in ns.split('\n')) {
+      final parts = line.trim().split(RegExp(r'\s+'));
+      if (parts.length >= 2 && parts[0] == 'default') {
+        final ip = parts[1];
+        if (RegExp(r'^\d+\.\d+\.\d+\.\d+$').hasMatch(ip) && ip != '127.0.0.1') {
+          return ip;
+        }
+      }
+    }
+    return null;
+  }
+
+  // Windows 方法 1：route print
+  final out = await run('route', ['print', '0.0.0.0']);
   for (final line in out.split('\n')) {
-    final parts =
-        line.trim().split(RegExp(r'\s+'));
+    final parts = line.trim().split(RegExp(r'\s+'));
     if (parts.length >= 3 &&
         parts[0] == '0.0.0.0' &&
         parts[1] == '0.0.0.0') {
@@ -54,8 +88,8 @@ String? defaultGateway() {
     }
   }
 
-  // 方法 2：ipconfig
-  final text = run('ipconfig', []);
+  // Windows 方法 2：ipconfig
+  final text = await run('ipconfig', []);
   final gws = <String>[];
   for (final line in text.split('\n')) {
     final low = line.toLowerCase();
@@ -68,29 +102,87 @@ String? defaultGateway() {
     }
   }
   for (final ip in gws) {
-    if (ip.startsWith('192.168.') || ip.startsWith('10.')) return ip;
+    if (isPrivateIpv4(ip)) return ip;
   }
   return gws.isEmpty ? null : gws.first;
 }
 
-/// 列出本机所在网段（如 192.168.31）。
-Future<List<String>> localNetworks() async {
-  final nets = <String>{};
+/// 严格按 RFC1918 判断私网 IPv4（10/8、172.16/12、192.168/16）。
+bool isPrivateIpv4(String ip) {
+  final parts = ip.split('.');
+  if (parts.length != 4) return false;
+  final a = int.tryParse(parts[0]);
+  final b = int.tryParse(parts[1]);
+  final c = int.tryParse(parts[2]);
+  final d = int.tryParse(parts[3]);
+  if (a == null || b == null || c == null || d == null) return false;
+  if (a < 0 || a > 255 || b < 0 || b > 255 || c < 0 || c > 255 || d < 0 || d > 255) {
+    return false;
+  }
+  if (a == 10) return true;
+  if (a == 192 && b == 168) return true;
+  if (a == 172 && b >= 16 && b <= 31) return true;
+  return false;
+}
+
+bool _isLikelyVirtualInterface(String name) {
+  final n = name.toLowerCase();
+  const hints = [
+    'vethernet',
+    'wsl',
+    'docker',
+    'vmware',
+    'virtualbox',
+    'vbox',
+    'hyper-v',
+    'meta',
+    'clash',
+    'mihomo',
+    'sing-box',
+    'tailscale',
+    'zerotier',
+    'wireguard',
+    'wintun',
+    'tun',
+    'tap',
+    'npcap',
+    'loopback',
+  ];
+  return hints.any(n.contains);
+}
+
+/// 列出本机所在私网段（如 192.168.31），跳过常见虚拟/隧道网卡以加速扫描，
+/// 并将默认网关所在网段置顶。
+Future<List<String>> localNetworks({String? preferGateway}) async {
+  final physical = <String>{};
+  final fallback = <String>{};
   try {
     for (final it in await NetworkInterface.list(includeLoopback: false)) {
+      final virtual = _isLikelyVirtualInterface(it.name);
       for (final addr in it.addresses) {
         if (addr.type == InternetAddressType.IPv4) {
           final ip = addr.address;
-          if (ip.startsWith('192.168.') ||
-              ip.startsWith('10.') ||
-              ip.startsWith('172.')) {
-            nets.add(ip.substring(0, ip.lastIndexOf('.')));
+          if (!isPrivateIpv4(ip)) continue;
+          final net = ip.substring(0, ip.lastIndexOf('.'));
+          if (virtual) {
+            fallback.add(net);
+          } else {
+            physical.add(net);
           }
         }
       }
     }
   } catch (_) {}
-  return nets.toList()..sort();
+  final chosen = (physical.isNotEmpty ? physical : fallback).toList()..sort();
+  if (preferGateway != null && isPrivateIpv4(preferGateway)) {
+    final gwNet = preferGateway.substring(0, preferGateway.lastIndexOf('.'));
+    if (chosen.remove(gwNet)) {
+      chosen.insert(0, gwNet);
+    } else {
+      chosen.insert(0, gwNet);
+    }
+  }
+  return chosen;
 }
 
 /// 只做 TCP 连接探测，判断端口是否在监听。
@@ -137,14 +229,23 @@ Future<(bool, String)> _verifyOnce(String host, int port) async {
         .getUrl(Uri.parse('http://$host:$port/'))
         .timeout(const Duration(milliseconds: 2500));
     final resp = await req.close().timeout(const Duration(milliseconds: 2500));
-    // 不看状态码（有的固件对 / 回 30x/40x），只认页面里的标题词——
-    // 路由器的 400/管理页里不会有「米家自动化极客版」，拦得住。
-    final body = await resp
-        .transform(const Utf8Decoder(allowMalformed: true))
-        .fold<StringBuffer>(
-            StringBuffer(), (sb, chunk) => sb..write(chunk))
-        .timeout(const Duration(milliseconds: 3000));
-    final text = body.toString();
+    // 真正限制最多读取前 64 KB：一旦命中标题词立即停读，防止被大文件/流媒体拖死。
+    const maxBytes = 64 * 1024;
+    final bytes = <int>[];
+    final deadline = DateTime.now().add(const Duration(milliseconds: 3000));
+    await for (final chunk in resp) {
+      final remain = maxBytes - bytes.length;
+      if (remain <= 0) break;
+      if (chunk.length <= remain) {
+        bytes.addAll(chunk);
+      } else {
+        bytes.addAll(chunk.sublist(0, remain));
+      }
+      final partial = const Utf8Decoder(allowMalformed: true).convert(bytes);
+      if (partial.contains('米家自动化极客版')) return (true, '');
+      if (bytes.length >= maxBytes || DateTime.now().isAfter(deadline)) break;
+    }
+    final text = const Utf8Decoder(allowMalformed: true).convert(bytes);
     if (text.contains('米家自动化极客版')) return (true, '');
     return (false,
         'HTTP ${resp.statusCode} 但页面没有标题词，开头「${snippet(text)}」');
@@ -165,8 +266,13 @@ Map<String, Object?> loadCache() {
 
 void saveCache(Map<String, Object?> d) {
   try {
-    File(_cachePath())
-        .writeAsStringSync(const JsonEncoder.withIndent(' ').convert(d));
+    final p = _cachePath();
+    final tmp = '$p.tmp';
+    File(tmp).writeAsStringSync(
+      const JsonEncoder.withIndent(' ').convert(d),
+      flush: true,
+    );
+    File(tmp).renameSync(p);
   } catch (_) {}
 }
 
@@ -217,8 +323,8 @@ Future<(String, int, String)> discover({bool useCache = true}) async {
     }
   }
 
-  final gw = defaultGateway();
-  final nets = await localNetworks();
+  final gw = await defaultGateway();
+  final nets = await localNetworks(preferGateway: gw);
   final near = <String>[
     ?gw,
     for (final net in nets) '$net.1',

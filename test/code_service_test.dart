@@ -9,8 +9,9 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter_test/flutter_test.dart';
+import 'package:ezmigeek_flutter/core/app_dirs.dart' show pJoin;
 import 'package:ezmigeek_flutter/services/code_service.dart';
+import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   late Directory tmp;
@@ -47,7 +48,7 @@ void main() {
     final port = await svc.start();
     expect(port, isNotNull);
     final ipc = jsonDecode(
-        File('${tmp.path}\\ipc.json').readAsStringSync()) as Map;
+        File(pJoin(tmp.path, 'ipc.json')).readAsStringSync()) as Map;
     expect(ipc['port'], port);
     expect('${ipc['token']}'.length, 64);
     expect(ipc['pid'], isNotNull);
@@ -128,7 +129,7 @@ void main() {
     final svc = CodeService(dirOverride: tmp.path, fetcher: (_, _) async => '123456');
     final port = (await svc.start())!;
     await svc.stop();
-    expect(File('${tmp.path}\\ipc.json').existsSync(), isFalse);
+    expect(File(pJoin(tmp.path, 'ipc.json')).existsSync(), isFalse);
     final c = HttpClient();
     try {
       final req = await c.getUrl(
@@ -139,6 +140,46 @@ void main() {
       // 预期：连接被拒
     } finally {
       c.close();
+    }
+  });
+
+  test('安全加固：支持 Bearer 头、拒绝非 GET、拒绝非法 Host 头并返回版本号', () async {
+    final svc = CodeService(
+      dirOverride: tmp.path,
+      version: '3.1.0',
+      fetcher: (_, _) async => '888666',
+    );
+    final port = (await svc.start())!;
+    final c = HttpClient();
+    try {
+      // 1. Authorization: Bearer 头鉴权 + 返回 version
+      final req1 = await c.getUrl(Uri.parse('http://127.0.0.1:$port/ping'));
+      req1.headers.set(HttpHeaders.authorizationHeader, 'Bearer ${svc.token}');
+      final resp1 = await req1.close();
+      final body1 = jsonDecode(await resp1.transform(utf8.decoder).join()) as Map;
+      expect(resp1.statusCode, 200);
+      expect(body1['ok'], isTrue);
+      expect(body1['version'], '3.1.0');
+
+      // 2. 非 GET 方法 → 405
+      final req2 = await c.postUrl(
+        Uri.parse('http://127.0.0.1:$port/ping?token=${svc.token}'),
+      );
+      final resp2 = await req2.close();
+      await resp2.drain<void>();
+      expect(resp2.statusCode, 405);
+
+      // 3. DNS Rebinding 模拟（非法 Host 头）→ 403
+      final req3 = await c.getUrl(
+        Uri.parse('http://127.0.0.1:$port/ping?token=${svc.token}'),
+      );
+      req3.headers.set(HttpHeaders.hostHeader, 'evil.example.com');
+      final resp3 = await req3.close();
+      await resp3.drain<void>();
+      expect(resp3.statusCode, 403);
+    } finally {
+      c.close();
+      await svc.stop();
     }
   });
 }

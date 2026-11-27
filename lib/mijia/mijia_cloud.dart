@@ -18,6 +18,7 @@ import 'package:crypto/crypto.dart' as crypto;
 
 import '../core/app_dirs.dart';
 import '../services/dpapi.dart';
+import '../services/win_cert.dart';
 
 class MijiaError implements Exception {
   MijiaError(this.message);
@@ -34,11 +35,13 @@ const List<String> requiredCredKeys = [
   'deviceId',
 ];
 
-/// 有「虚拟服务 / 中枢链接」能力的设备型号前缀（mijia_cloud.HUB_MODELS）。
+/// 有「虚拟服务 / 中枢链接」能力的设备型号前缀（覆盖路由、独立中枢与网关）。
 const List<String> hubModels = [
   'xiaomi.gateway.hub',
+  'xiaomi.central.',
   'xiaomi.router.',
   'xiaomi.gateway.',
+  'lumi.gateway.',
 ];
 
 const String _ua =
@@ -74,7 +77,10 @@ Map<String, Object?> loadCfg([String? path]) {
   if (raw['_encrypted'] == true) {
     try {
       final plain = utf8.decode(
-        dpapiUnprotect(base64.decode('${raw['blob']}')),
+        dpapiUnprotect(
+          base64.decode('${raw['blob']}'),
+          svc: kcServiceCredentials,
+        ),
       );
       return Map<String, Object?>.from(jsonDecode(plain) as Map);
     } on StateError {
@@ -83,7 +89,17 @@ Map<String, Object?> loadCfg([String? path]) {
       throw MijiaError('凭据解密失败：$e');
     }
   }
-  // 旧明文格式：读出来顺手转成加密存储（透明迁移，同 Python 版）。
+  // 兼容早期 macOS 本地分发版格式（{'_keychain': true}，本体在 Keychain acct=primary）。
+  if (raw['_keychain'] == true) {
+    final b64 = keychainRead(kcServiceCredentials, 'primary');
+    if (b64 == null) {
+      throw MijiaError('钥匙串里读不到小米凭据，请重新登录一次小米账号');
+    }
+    return Map<String, Object?>.from(
+      jsonDecode(utf8.decode(base64.decode(b64))) as Map,
+    );
+  }
+  // 旧明文格式：读出来顺手转成加密存储（透明迁移）。
   if ('${raw['passToken'] ?? ''}'.isNotEmpty) {
     try {
       saveCfg(raw, p);
@@ -92,23 +108,30 @@ Map<String, Object?> loadCfg([String? path]) {
   return raw;
 }
 
+void _atomicWriteFile(String path, String content) {
+  final tmp = '$path.tmp';
+  File(tmp).writeAsStringSync(content, flush: true);
+  try {
+    File(tmp).renameSync(path);
+  } catch (_) {
+    final main = File(path);
+    if (main.existsSync()) main.deleteSync();
+    File(tmp).renameSync(path);
+  }
+}
+
 bool saveCfg(Map<String, Object?> cfg, [String? path]) {
   final p = path ?? credsPath();
   try {
     final data = utf8.encode(const JsonEncoder.withIndent('  ').convert(cfg));
     final obj = <String, Object?>{
-      '_说明': '小米账号凭据使用 Windows DPAPI 加密，仅当前电脑当前用户可解。',
+      '_说明': Platform.isWindows
+          ? '小米账号凭据使用 Windows DPAPI 加密，仅当前电脑当前用户可解。'
+          : '小米账号凭据已存入 macOS 钥匙串（Keychain），此文件仅保存指针。',
       '_encrypted': true,
-      'blob': base64.encode(dpapiProtect(data)),
+      'blob': base64.encode(dpapiProtect(data, svc: kcServiceCredentials)),
     };
-    final tmp = '$p.tmp';
-    File(tmp).writeAsStringSync(
-      const JsonEncoder.withIndent('  ').convert(obj),
-      flush: true,
-    );
-    final main = File(p);
-    if (main.existsSync()) main.deleteSync();
-    File(tmp).renameSync(p);
+    _atomicWriteFile(p, const JsonEncoder.withIndent('  ').convert(obj));
     return true;
   } catch (_) {
     return false;
@@ -121,9 +144,14 @@ Map<String, Object?> _readJson(String path) {
   try {
     final raw = jsonDecode(File(path).readAsStringSync());
     if (raw is Map && raw['_encrypted'] == true) {
+      // macOS Keychain 必须按服务名分开读（默认 kcServiceCredentials 兼容旧文件）。
+      final svc = '${raw['_kcsvc'] ?? kcServiceCredentials}';
       return Map<String, Object?>.from(
-        jsonDecode(utf8.decode(dpapiUnprotect(base64.decode('${raw['blob']}'))))
-            as Map,
+        jsonDecode(
+          utf8.decode(
+            dpapiUnprotect(base64.decode('${raw['blob']}'), svc: svc),
+          ),
+        ) as Map,
       );
     }
     if (raw is Map) return Map<String, Object?>.from(raw);
@@ -135,15 +163,15 @@ bool _writeJson(String path, Map<String, Object?> obj) {
   try {
     Map<String, Object?> toWrite = obj;
     if (path == _tokenCachePath()) {
-      // serviceToken / ssecurity 也是敏感令牌，缓存同样加密落盘。
+      // serviceToken / ssecurity 也是敏感令牌，缓存加密落盘且与凭据分 Keychain 服务名。
       final data = utf8.encode(jsonEncode(obj));
-      toWrite = {'_encrypted': true, 'blob': base64.encode(dpapiProtect(data))};
+      toWrite = {
+        '_encrypted': true,
+        '_kcsvc': kcServiceTokenCache,
+        'blob': base64.encode(dpapiProtect(data, svc: kcServiceTokenCache)),
+      };
     }
-    final tmp = '$path.tmp';
-    File(tmp).writeAsStringSync(jsonEncode(toWrite), flush: true);
-    final main = File(path);
-    if (main.existsSync()) main.deleteSync();
-    File(tmp).renameSync(path);
+    _atomicWriteFile(path, jsonEncode(toWrite));
     return true;
   } catch (_) {
     return false;
@@ -179,15 +207,40 @@ void clearDeviceCache() {
 
 final List<HttpClient> _liveClients = [];
 
-/// 证书校验例外（v3.0.6）：个别机器 Windows 证书库不完整（缺根/中级 CA），
-/// 到小米云的 HTTPS 全部 CERTIFICATE_VERIFY_FAILED——浏览器能过是因为
-/// 它会自动补拉证书链，我们用的 BoringSSL 不会（实测踩过）。
-/// 策略：这个客户端只连小米接口，遇坏证书记一笔就放行；原因串给日志。
+/// 允许连接的小米官方服务域名白名单（含换票重定向目标）。
+const Set<String> _trustedExactHosts = {
+  'account.xiaomi.com',
+  'account.mi.com',
+  'api.io.mi.com',
+  'core.api.mijia.tech',
+  'sts.api.mijia.tech',
+  'sts.api.io.mi.com',
+};
+
+const List<String> _trustedHostSuffixes = [
+  '.account.xiaomi.com',
+  '.account.mi.com',
+  '.api.io.mi.com',
+  '.api.mijia.tech',
+  '.sts.api.io.mi.com',
+  '.sts.api.mijia.tech',
+];
+
+/// 判断主机名是否属于受信任的小米官方域（防止开放重定向与跨站证书放行）。
+bool isTrustedXiaomiHost(String host) {
+  final h = host.trim().toLowerCase();
+  if (h.isEmpty) return false;
+  if (_trustedExactHosts.contains(h)) return true;
+  return _trustedHostSuffixes.any((s) => h.endsWith(s) && h.length > s.length);
+}
+
+/// 证书补验标记：当 BoringSSL 因缺中间 CA 失败、但 Windows 原生 CryptoAPI
+/// （含 AIA 补链与系统信任根校验）验证通过时记一笔，供诊断日志呈现。
 bool certFallbackUsed = false;
 String? certFallbackReason;
 bool _certFallbackLogged = false;
 
-/// 候选设备/取码的日志出口用来报一次「例外已启用」，避免每轮重复刷。
+/// 候选设备/取码的日志出口用来报一次「系统证书链补验已启用」，避免每轮重复刷。
 bool takeCertFallbackNotice() {
   if (!certFallbackUsed || _certFallbackLogged) return false;
   _certFallbackLogged = true;
@@ -198,11 +251,19 @@ HttpClient cloudClient({int connTimeoutSecs = 20}) {
   final c = HttpClient()..findProxy = null; // 绕开宿主环境的 http_proxy
   c.connectionTimeout = Duration(seconds: connTimeoutSecs);
   c.badCertificateCallback = (cert, host, port) {
+    // 严格防 MITM：
+    //   1. 非 Windows 平台（如 macOS 系统根证书库完整）直接走默认严格 TLS 校验；
+    //   2. 非小米官方域名一律拒绝；
+    //   3. Windows 上调用原生 CryptoAPI 验证证书链、有效期与主机名匹配。
+    if (!Platform.isWindows || !isTrustedXiaomiHost(host)) return false;
+    final (ok, detail) = verifyWindowsSslCertificate(cert.der, host);
+    if (!ok) return false;
     if (!certFallbackUsed) {
       certFallbackUsed = true;
-      certFallbackReason = '$host:$port 证书签发者「${cert.issuer}」';
+      certFallbackReason =
+          '$host:$port 已通过 Windows 系统证书链补验（签发者「${cert.issuer}」，$detail）';
     }
-    return true; // 只作用于本客户端（只连小米接口），不碰别的网站
+    return true;
   };
   _liveClients.add(c);
   return c;
@@ -293,9 +354,13 @@ Future<Map<String, Object?>> _mintViaSession(
   }
   // 跟 30x 去 sts 域拿 serviceToken。★ 手动跟重定向：自动跟随只给最终响应，
   // 中间跳转的 Set-Cookie 会被丢掉 —— serviceToken 正是跳转链里发的。
+  // 安全校验：每一跳都必须保持 HTTPS 且目标域属于小米官方白名单。
   var tok = '';
   var url = Uri.parse('${j['location']}');
   for (var hop = 0; hop < 6 && tok.isEmpty; hop++) {
+    if (url.scheme.toLowerCase() != 'https' || !isTrustedXiaomiHost(url.host)) {
+      throw MijiaError('拒绝非预期的换票重定向目标：${url.scheme}://${url.host}');
+    }
     final req2 = await c.openUrl('GET', url);
     req2.headers.set('User-Agent', _ua);
     req2.followRedirects = false;
@@ -308,7 +373,7 @@ Future<Map<String, Object?>> _mintViaSession(
     }
     final loc = resp2.headers.value(HttpHeaders.locationHeader);
     if (loc != null && loc.isNotEmpty) {
-      url = Uri.parse(loc);
+      url = url.resolve(loc);
       continue;
     }
     break;

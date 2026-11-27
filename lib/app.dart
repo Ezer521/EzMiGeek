@@ -1,6 +1,8 @@
 // app.dart —— 应用壳：无 Material 装饰的纯玻璃画布 + 关窗拦截。
 library;
 
+import 'dart:io' show Platform;
+
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -56,7 +58,7 @@ class _EzMiGeekAppState extends State<EzMiGeekApp> with WindowListener {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        fontFamily: 'Microsoft YaHei UI',
+        fontFamily: Platform.isWindows ? 'Microsoft YaHei UI' : 'PingFang SC',
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF1A7AF5)),
         useMaterial3: true,
       ),

@@ -16,26 +16,16 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 3.0.6+1
+version: 3.1.0+1
 
 environment:
-  sdk: ^3.13.4
+  sdk: '>=3.8.0 <4.0.0'
 
-# Dependencies specify other packages that your package needs in order to work.
-# To automatically upgrade your package dependencies to the latest versions
-# consider running `flutter pub upgrade --major-versions`. Alternatively,
-# dependencies can be manually updated by changing the version numbers below to
-# the latest version available on pub.dev. To see which dependencies have newer
-# versions available, run `flutter pub outdated`.
 dependencies:
   flutter:
     sdk: flutter
 
-  # The following adds the Cupertino Icons font to your application.
-  # Use with the CupertinoIcons class for iOS style icons.
-  cupertino_icons: ^1.0.8
-
-  # 窗口控制 / 托盘 / CDP websocket / 小米云签名哈希 / FFI(DPAPI)
+  # 窗口控制 / 托盘 / CDP websocket / 小米云签名哈希 / FFI(DPAPI/Win32)
   window_manager: ^0.5.1
   system_tray: ^2.0.3
   web_socket_channel: ^3.0.3
@@ -58,8 +48,8 @@ dev_dependencies:
 
 # The following section is specific to Flutter packages.
 flutter:
-
-  uses-material-design: true
+  # 全界面为手绘玻璃画布与自定义矢量图标，无需打包 MaterialIcons 字体。
+  uses-material-design: false
 
   assets:
     - assets/agent.js
