@@ -111,8 +111,34 @@ Uint8List _runWinDpapi(_CryptFnDart fn, Uint8List data) {
 const int _kcTag0 = 0x4B, _kcTag1 = 0x43, _kcTag2 = 0x31, _kcTag3 = 0x00; // 'KC1\0'
 const int _rawTag0 = 0x52, _rawTag1 = 0x41, _rawTag2 = 0x57, _rawTag3 = 0x31; // 'RAW1'
 const String _kcAccount = 'xiaoMiCreds';
+const String _kcB64Prefix = 'b64:';
 const String kcServiceCredentials = 'EzMiGeek.credentials';
 const String kcServiceTokenCache = 'EzMiGeek.token-cache';
+
+/// 将字节编码为单行纯 ASCII，避免 macOS `/usr/bin/security` 遇换行或中文自动转十六进制。
+String encodeMacKeychainSecret(Uint8List data) =>
+    '$_kcB64Prefix${base64.encode(data)}';
+
+/// 解析 `/usr/bin/security find-generic-password -w` 输出：
+///   1) 新版 `b64:<base64>` 载荷；
+///   2) 旧版被 `security` 自动转成偶数位纯十六进制的多行/UTF-8 载荷；
+///   3) 旧版单行纯 ASCII 原文。
+Uint8List decodeMacKeychainSecret(String raw) {
+  final trimmed = raw.replaceFirst(RegExp(r'\r?\n$'), '');
+  if (trimmed.startsWith(_kcB64Prefix)) {
+    return base64.decode(trimmed.substring(_kcB64Prefix.length));
+  }
+  if (trimmed.isNotEmpty &&
+      trimmed.length.isEven &&
+      RegExp(r'^[0-9a-fA-F]+$').hasMatch(trimmed)) {
+    final out = Uint8List(trimmed.length ~/ 2);
+    for (var i = 0; i < out.length; i++) {
+      out[i] = int.parse(trimmed.substring(i * 2, i * 2 + 2), radix: 16);
+    }
+    return out;
+  }
+  return Uint8List.fromList(utf8.encode(trimmed));
+}
 
 ProcessResult _runSecurity(List<String> args) => Process.runSync(
   '/usr/bin/security',
@@ -131,7 +157,7 @@ Uint8List dpapiProtect(Uint8List data, {String svc = kcServiceCredentials}) {
       '-s',
       svc,
       '-w',
-      utf8.decode(data, allowMalformed: false),
+      encodeMacKeychainSecret(data),
       '-U',
     ]);
     if (r.exitCode != 0) {
@@ -161,7 +187,7 @@ Uint8List dpapiUnprotect(Uint8List data, {String svc = kcServiceCredentials}) {
       if (r.exitCode != 0) {
         throw StateError('钥匙串里读不到凭据（rc=${r.exitCode}，svc=$svc）——请重新登录一次小米账号。');
       }
-      return utf8.encode('${r.stdout}'.replaceFirst(RegExp(r'\n$'), ''));
+      return decodeMacKeychainSecret('${r.stdout}');
     }
     if (data.length >= 4 &&
         data[0] == _rawTag0 &&

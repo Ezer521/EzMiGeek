@@ -144,6 +144,7 @@ Future<void> _boot(List<String> args) async {
     title:
         'EzMiGeek · ${Lang.zh ? '米家自动化极客版自动登录助手' : 'Mi Geek auto sign-in helper'}',
     titleBarStyle: TitleBarStyle.hidden,
+    windowButtonVisibility: Platform.isWindows ? null : false,
     backgroundColor: Colors.transparent,
   );
   await windowManager.waitUntilReadyToShow(windowOptions, () async {
@@ -206,12 +207,18 @@ Future<void> _boot(List<String> args) async {
 
   if (!uiPng) {
     try {
-      // 托盘图标：Windows 用 .ico，macOS 用 .png（system_tray 两平台各自要求）。
-      final trayAsset = Platform.isWindows ? 'assets/app.ico' : 'assets/logo.png';
-      final trayName = Platform.isWindows ? 'tray.ico' : 'tray.png';
-      final iconBytes = await rootBundle.load(trayAsset);
-      final iconFile = File(pJoin(dataDir(), trayName));
-      await iconFile.writeAsBytes(iconBytes.buffer.asUint8List(), flush: true);
+      // 托盘图标：
+      //   · Windows：把 assets/app.ico 写到数据目录后传磁盘路径；
+      //   · macOS：system_tray 底层调用 rootBundle.load(iconPath)，必须传 Flutter asset key。
+      final String trayIconPath;
+      if (Platform.isWindows) {
+        final iconBytes = await rootBundle.load('assets/app.ico');
+        final iconFile = File(pJoin(dataDir(), 'tray.ico'));
+        await iconFile.writeAsBytes(iconBytes.buffer.asUint8List(), flush: true);
+        trayIconPath = iconFile.path;
+      } else {
+        trayIconPath = 'assets/logo.png';
+      }
       tray.onShowPanel = () => unawaited(showAndFocusPanel());
       tray.onDoubleClick = () => unawaited(state.onTrayDoubleClicked());
       tray.onOpenGeek = () => unawaited(state.onOpenGeekClicked());
@@ -220,7 +227,7 @@ Future<void> _boot(List<String> args) async {
       tray.onLegal = () => unawaited(state.showLegal());
       tray.onCheckUpdate = () => unawaited(checkForUpdatesInteractive(kVersion));
       tray.onQuit = exitApp;
-      await tray.init(iconPath: iconFile.path, tooltip: t('app.name'));
+      await tray.init(iconPath: trayIconPath, tooltip: t('app.name'));
     } catch (e) {
       AppLog.write('托盘初始化失败：$e');
     }

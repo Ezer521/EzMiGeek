@@ -8,9 +8,12 @@ class AppDelegate: FlutterAppDelegate {
     return false
   }
 
-  // 窗口隐藏到托盘后，点击 Dock 图标或再次打开应用时把主窗口重新唤回前台。
+  // 窗口隐藏到托盘或最小化到 Dock 后，点击 Dock 图标或再次打开应用时把主窗口重新唤回前台。
   override func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
     if !flag, let window = mainFlutterWindow {
+      if window.isMiniaturized {
+        window.deminiaturize(nil)
+      }
       window.makeKeyAndOrderFront(nil)
       NSApp.activate(ignoringOtherApps: true)
     }

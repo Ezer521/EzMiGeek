@@ -49,10 +49,12 @@ bool _macDialog({
 }) {
   final script = cancelLabel == null
       ? 'on run argv\n'
+          '  activate\n'
           '  display dialog (item 2 of argv) with title (item 1 of argv) '
           'buttons {item 3 of argv} default button (item 3 of argv) with icon note\n'
           'end run'
       : 'on run argv\n'
+          '  activate\n'
           '  display dialog (item 2 of argv) with title (item 1 of argv) '
           'buttons {item 4 of argv, item 3 of argv} default button (item 3 of argv) '
           'cancel button (item 4 of argv) with icon note\n'

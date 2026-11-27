@@ -207,10 +207,13 @@ int findOwnWindowByClass(String className) {
 }
 
 /// 通知已在运行的 EzMiGeek 实例把主面板弹到前台。
-/// Windows 走跨进程窗口消息；macOS 走 `open -a EzMiGeek` 触发 AppDelegate.applicationShouldHandleReopen。
+/// Windows 走跨进程窗口消息；macOS 优先按 Bundle ID 唤起（兼容任意运行目录）。
 bool signalRunningInstance() {
   if (!Platform.isWindows) {
     try {
+      if (Process.runSync('/usr/bin/open', ['-b', 'com.ezer.ezmigeek']).exitCode == 0) {
+        return true;
+      }
       return Process.runSync('/usr/bin/open', ['-a', 'EzMiGeek']).exitCode == 0;
     } catch (_) {
       return false;

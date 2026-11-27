@@ -1,0 +1,34 @@
+PODS:
+  - FlutterMacOS (1.0.0)
+  - screen_retriever_macos (0.0.1):
+    - FlutterMacOS
+  - system_tray (0.0.1):
+    - FlutterMacOS
+  - window_manager (0.5.0):
+    - FlutterMacOS
+
+DEPENDENCIES:
+  - FlutterMacOS (from `Flutter/ephemeral`)
+  - screen_retriever_macos (from `Flutter/ephemeral/.symlinks/plugins/screen_retriever_macos/macos`)
+  - system_tray (from `Flutter/ephemeral/.symlinks/plugins/system_tray/macos`)
+  - window_manager (from `Flutter/ephemeral/.symlinks/plugins/window_manager/macos`)
+
+EXTERNAL SOURCES:
+  FlutterMacOS:
+    :path: Flutter/ephemeral
+  screen_retriever_macos:
+    :path: Flutter/ephemeral/.symlinks/plugins/screen_retriever_macos/macos
+  system_tray:
+    :path: Flutter/ephemeral/.symlinks/plugins/system_tray/macos
+  window_manager:
+    :path: Flutter/ephemeral/.symlinks/plugins/window_manager/macos
+
+SPEC CHECKSUMS:
+  FlutterMacOS: c232990155153907050900a2e175c7773903ba4e
+  screen_retriever_macos: 038d3f7b34a779b06f536842003e41e8ec1fb4b7
+  system_tray: e53c972838c69589ff2e77d6d3abfd71332f9e5d
+  window_manager: e25faf20d88283a0d46e7b1a759d07261ca27575
+
+PODFILE CHECKSUM: 1e95c36afbfd1cb6423ceca4de7a8e1b256fb6ac
+
+COCOAPODS: 1.17.0

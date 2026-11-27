@@ -29,6 +29,8 @@ import 'package:ezmigeek_flutter/native/win32.dart'
     show hkeyCurrentUser, regReadSz;
 import 'package:ezmigeek_flutter/services/autostart.dart'
     show buildMacLaunchAgentPlist, parseMacLaunchAgentExecutable;
+import 'package:ezmigeek_flutter/services/dpapi.dart'
+    show decodeMacKeychainSecret, encodeMacKeychainSecret;
 import 'package:ezmigeek_flutter/services/onboard_service.dart'
     show extractXiaomiCredsFromCookies, isXiaomiCookieDomain;
 import 'package:ezmigeek_flutter/services/update_checker.dart'
@@ -46,7 +48,7 @@ void main() {
     // 公网安静 / 私网挂载 / 钉目标闸 / 手动数字单次点击 / 跨 origin 拒填 /
     // 逐键单击。这里只负责跑起来和把失败场景的名字顶出来。
     test('七场景真执行全过', () async {
-      final r = await Process.run('node', ['test/agent_harness.mjs']);
+      final r = await _runNodeScript(['test/agent_harness.mjs']);
       final out = r.stdout.toString();
       final Map<String, Object?> j;
       try {
@@ -266,6 +268,25 @@ void main() {
       expect(parseMacLaunchAgentExecutable(plist), exe);
     });
 
+    test('macOS 钥匙串编解码：多行中文 JSON 往返无损且兼容 security 十六进制旧输出', () {
+      const sample = '{\n  "userId": "123456",\n  "note": "中文测试"\n}';
+      final encoded = encodeMacKeychainSecret(Uint8List.fromList(utf8.encode(sample)));
+      expect(encoded.startsWith('b64:'), true);
+      expect(encoded.contains('\n'), false);
+      expect(utf8.decode(decodeMacKeychainSecret('$encoded\n')), sample);
+
+      // 模拟 macOS /usr/bin/security find-generic-password -w 对旧版多行 UTF-8 自动输出的十六进制字符串
+      final legacyHex = utf8
+          .encode(sample)
+          .map((b) => b.toRadixString(16).padLeft(2, '0'))
+          .join();
+      expect(utf8.decode(decodeMacKeychainSecret('$legacyHex\n')), sample);
+
+      // 模拟旧版单行纯 ASCII JSON
+      const plainSingle = '{"userId":"123456","passToken":"abc+/="}';
+      expect(utf8.decode(decodeMacKeychainSecret('$plainSingle\n')), plainSingle);
+    });
+
     test('macOS route -n get default 网关解析', () {
       const sample = '''
    route to: default
@@ -377,4 +398,27 @@ destination: default
       expect(js, isNot(contains('try { el.click(); } catch (e) {}')));
     });
   });
+}
+
+Future<ProcessResult> _runNodeScript(List<String> args) async {
+  try {
+    return await Process.run('node', args);
+  } on ProcessException {
+    if (Platform.isWindows) rethrow;
+    final home = Platform.environment['HOME'] ?? '';
+    final candidates = <String>[
+      if ((Platform.environment['NODE_BIN'] ?? '').isNotEmpty)
+        Platform.environment['NODE_BIN']!,
+      '/opt/homebrew/bin/node',
+      '/usr/local/bin/node',
+      if (home.isNotEmpty)
+        '$home/Library/Application Support/Antigravity/bin/agy-node',
+    ];
+    for (final bin in candidates) {
+      if (File(bin).existsSync()) {
+        return Process.run(bin, args);
+      }
+    }
+    rethrow;
+  }
 }
