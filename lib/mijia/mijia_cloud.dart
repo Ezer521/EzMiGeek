@@ -248,7 +248,7 @@ bool takeCertFallbackNotice() {
 }
 
 HttpClient cloudClient({int connTimeoutSecs = 20}) {
-  final c = HttpClient()..findProxy = null; // 绕开宿主环境的 http_proxy
+  final c = HttpClient()..findProxy = (_) => 'DIRECT'; // 绕开宿主环境的 http_proxy
   c.connectionTimeout = Duration(seconds: connTimeoutSecs);
   c.badCertificateCallback = (cert, host, port) {
     // 严格防 MITM：

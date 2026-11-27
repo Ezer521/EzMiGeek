@@ -13,7 +13,7 @@ import 'package:ezmigeek_flutter/browser/browser_ctl.dart'
     show isChromiumExe;
 import 'package:ezmigeek_flutter/core/i18n.dart';
 import 'package:ezmigeek_flutter/mijia/hub_discovery.dart'
-    show isPrivateIpv4, parseMacRouteGateway;
+    show isPrivateIpv4, parseMacRouteGateway, verifyHubDetail;
 import 'package:ezmigeek_flutter/mijia/mijia_cloud.dart'
     show
         authFailed,
@@ -371,6 +371,49 @@ destination: default
       st.reportRoundForTest(99);
       expect(st.ui.warn, true);
       expect(st.ui.bottomLine, contains('rc=99'));
+    });
+
+    test('rc=1 环境失败细分提示：精准告知中枢/浏览器/启动原因与下一步操作', () {
+      Lang.set('zh');
+      final st = AppState();
+      st.reportRoundForTest(1, envFail: EnvFailKind.noHub);
+      expect(st.ui.warn, true);
+      expect(st.ui.status, '未找到极客版中枢');
+      expect(st.ui.infoLine, contains('HubIp'));
+
+      st.reportRoundForTest(
+        1,
+        envFail: EnvFailKind.manualHub,
+        detail: '192.168.31.1:8086',
+      );
+      expect(st.ui.status, '指定中枢连不上');
+      expect(st.ui.bottomLine, contains('192.168.31.1:8086'));
+
+      st.reportRoundForTest(1, envFail: EnvFailKind.noBrowser);
+      expect(st.ui.status, '未找到可用浏览器');
+      expect(st.ui.bottomLine, contains('Edge / Chrome'));
+
+      st.reportRoundForTest(1, envFail: EnvFailKind.browserStart);
+      expect(st.ui.status, '浏览器启动失败');
+      expect(st.ui.bottomLine, contains('调试通道'));
+    });
+
+    test('中枢身份校验 verifyHubDetail 强制直连（绕开 HTTP_PROXY）', () async {
+      final saved = HttpOverrides.current;
+      HttpOverrides.global = null;
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      server.listen((req) async {
+        req.response.headers.contentType = ContentType.html;
+        req.response.write('<!doctype html><title>米家自动化极客版</title>');
+        await req.response.close();
+      });
+      try {
+        final (ok, why) = await verifyHubDetail('127.0.0.1', port: server.port);
+        expect(ok, true, reason: why);
+      } finally {
+        HttpOverrides.global = saved;
+        await server.close(force: true);
+      }
     });
 
     test('LocalCodeService 配置默认开启且支持开关往返', () {

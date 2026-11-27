@@ -217,7 +217,8 @@ Future<bool> verifyHub(String host, {int port = geekPort}) async =>
     (await verifyHubDetail(host, port: port)).$1;
 
 Future<(bool, String)> _verifyOnce(String host, int port) async {
-  final client = HttpClient();
+  // 局域网中枢身份校验必须直连，严禁走宿主 HTTP_PROXY（否则在代理环境下必收 502）。
+  final client = HttpClient()..findProxy = (_) => 'DIRECT';
   client.connectionTimeout = const Duration(milliseconds: 1500);
   String snippet(String s) {
     final oneLine = s.replaceAll(RegExp(r'\s+'), ' ').trim();

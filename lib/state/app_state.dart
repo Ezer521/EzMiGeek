@@ -61,6 +61,9 @@ class UiFields {
   bool langZh = true;
 }
 
+/// rc=1 环境类失败细分原因：让界面直接指出卡在哪一步及怎么修，不再只显示笼统的「环境有问题」。
+enum EnvFailKind { none, noHub, manualHub, noBrowser, browserStart }
+
 class StatusDesc {
   StatusDesc(this.key, [this.args = const []]);
   final String key;
@@ -94,6 +97,10 @@ class AppState extends ChangeNotifier {
 
   // 降级轮（非 Chromium）最近一次取到的登录码，仅用于面板底部提示，不写日志。
   String _lastManualCode = '';
+
+  // rc=1 环境类失败的细分类型与附带信息（每次 kick 重置）。
+  EnvFailKind _envFailKind = EnvFailKind.none;
+  String _envFailDetail = '';
 
   // 连续失败转人工后的暂停闸：true = 不再自动取码填码，
   // 等用户在网页里手动输码（界面消失自动恢复）或点「极客开启」恢复。
@@ -503,6 +510,9 @@ class AppState extends ChangeNotifier {
     }
     _roundRunning = true;
     _autoRetried = false;
+    _envFailKind = EnvFailKind.none;
+    _envFailDetail = '';
+    _info = null;
     _log('$why → 起一轮。');
     setStatus('st.kick', bottomKey: 'st.kick.bottom', busyFlag: true);
     unawaited(_roundWrapper());
@@ -561,9 +571,54 @@ class AppState extends ChangeNotifier {
   }
 
   @visibleForTesting
-  void reportRoundForTest(int rc, {String manualCode = ''}) {
+  void reportRoundForTest(
+    int rc, {
+    String manualCode = '',
+    EnvFailKind envFail = EnvFailKind.none,
+    String detail = '',
+  }) {
     _lastManualCode = manualCode;
+    _envFailKind = envFail;
+    _envFailDetail = detail;
     _reportRound(rc);
+  }
+
+  void _reportEnvFail() {
+    switch (_envFailKind) {
+      case EnvFailKind.manualHub:
+        _info = StatusDesc('rc.1.nohub.info');
+        setStatus(
+          'rc.1.manualhub.status',
+          bottomKey: 'rc.1.manualhub.bottom',
+          bottomArgs: [_envFailDetail],
+          warnFlag: true,
+        );
+      case EnvFailKind.noHub:
+        _info = StatusDesc('rc.1.nohub.info');
+        setStatus(
+          'rc.1.nohub.status',
+          bottomKey:
+              Platform.isMacOS ? 'rc.1.nohub.bottom.mac' : 'rc.1.nohub.bottom',
+          warnFlag: true,
+        );
+      case EnvFailKind.noBrowser:
+        _info = StatusDesc('rc.1.nobrowser.info');
+        setStatus(
+          'rc.1.nobrowser.status',
+          bottomKey: 'rc.1.nobrowser.bottom',
+          warnFlag: true,
+        );
+      case EnvFailKind.browserStart:
+        _info = StatusDesc('rc.1.browser.info');
+        setStatus(
+          'rc.1.browser.status',
+          bottomKey: 'rc.1.browser.bottom',
+          warnFlag: true,
+        );
+      case EnvFailKind.none:
+        _info = StatusDesc('rc.1.info');
+        setStatus('rc.1.status', bottomKey: 'rc.1.bottom', warnFlag: true);
+    }
   }
 
   void _reportRound(int rc) {
@@ -571,7 +626,7 @@ class AppState extends ChangeNotifier {
       case 0:
         setStatus('rc.0.status', bottomKey: 'rc.0.bottom', warnFlag: false);
       case 1:
-        setStatus('rc.1.status', bottomKey: 'rc.1.bottom', warnFlag: true);
+        _reportEnvFail();
       case 3:
         setStatus('rc.3.status', bottomKey: 'rc.3.bottom', warnFlag: false);
       case 4:
@@ -670,11 +725,18 @@ class AppState extends ChangeNotifier {
       }
     }
     if (hubIp.isEmpty) {
+      _envFailKind = manual.isNotEmpty
+          ? EnvFailKind.manualHub
+          : EnvFailKind.noHub;
+      _envFailDetail = manual.isNotEmpty ? manual : hubWhy;
       _log('× 局域网里没找到极客版中枢，本轮取消。诊断：$hubWhy');
       _log(
         '· 可以在设置文件 settings.json 里加 "HubIp": "中枢IP[:端口]" 手动指定，'
         '或确认极客版主机已开机、和这台电脑在同一网段。',
       );
+      if (Platform.isMacOS) {
+        _log('· macOS 15+ 请同时确认「系统设置 → 隐私与安全性 → 本地网络」中已允许 EzMiGeek。');
+      }
       return 1;
     }
     final url = 'http://$hubIp${hubPort == 80 ? '' : ':$hubPort'}/';
@@ -691,6 +753,7 @@ class AppState extends ChangeNotifier {
       _log('解析不出系统默认浏览器，退回候选路径查找');
       exe = findBrowser() ?? '';
       if (exe.isEmpty) {
+        _envFailKind = EnvFailKind.noBrowser;
         _log('× 找不到任何可用的浏览器');
         return 1;
       }
@@ -728,6 +791,7 @@ class AppState extends ChangeNotifier {
 
       final page = await findPage(launched.port);
       if (page == null) {
+        _envFailKind = EnvFailKind.browserStart;
         _log('★ 找不到 page target');
         return 1;
       }
@@ -779,6 +843,9 @@ class AppState extends ChangeNotifier {
       // 6) 主循环
       return await _loop(tab, hubIp, launched, roundCreds ?? memCreds);
     } catch (e) {
+      if (launched == null || tab == null || !tab.isOpen) {
+        _envFailKind = EnvFailKind.browserStart;
+      }
       _log('× 一轮异常：$e');
       return 1;
     } finally {

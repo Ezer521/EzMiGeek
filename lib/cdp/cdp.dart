@@ -23,6 +23,7 @@ class CdpTab {
   }
 
   WebSocket? _ws;
+  HttpClient? _wsClient;
   final Map<int, Completer<Map<String, Object?>>> _pending = {};
   int _n = 0;
   bool _ready = false;
@@ -30,8 +31,10 @@ class CdpTab {
   Duration timeout = const Duration(seconds: 30);
 
   Future<void> _connect(String wsUrl) async {
+    final client = HttpClient()..findProxy = (_) => 'DIRECT';
+    _wsClient = client;
     try {
-      final ws = await WebSocket.connect(wsUrl);
+      final ws = await WebSocket.connect(wsUrl, customClient: client);
       _ws = ws;
       ws.listen((data) {
         try {
@@ -47,6 +50,8 @@ class CdpTab {
       _ready = true;
       _readyCompleter.complete();
     } catch (e) {
+      client.close(force: true);
+      if (_wsClient == client) _wsClient = null;
       _readyCompleter.completeError(CdpError('CDP 连接失败：$e'));
     }
   }
@@ -119,6 +124,10 @@ class CdpTab {
     try {
       _ws?.close();
     } catch (_) {}
+    try {
+      _wsClient?.close(force: true);
+    } catch (_) {}
+    _wsClient = null;
     _failAll('closed');
   }
 }

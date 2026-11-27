@@ -349,13 +349,18 @@ Future<int> killProfileHolders(String profileDir) async {
           );
           final wsUrl = '${j?['webSocketDebuggerUrl'] ?? ''}';
           if (wsUrl.isNotEmpty) {
-            final ws = await WebSocket.connect(wsUrl)
-                .timeout(const Duration(seconds: 2));
+            final wsClient = HttpClient()..findProxy = (_) => 'DIRECT';
             try {
-              ws.add(jsonEncode({'id': 1, 'method': 'Browser.close', 'params': {}}));
-              await Future<void>.delayed(const Duration(milliseconds: 500));
+              final ws = await WebSocket.connect(wsUrl, customClient: wsClient)
+                  .timeout(const Duration(seconds: 2));
+              try {
+                ws.add(jsonEncode({'id': 1, 'method': 'Browser.close', 'params': {}}));
+                await Future<void>.delayed(const Duration(milliseconds: 500));
+              } finally {
+                await ws.close();
+              }
             } finally {
-              await ws.close();
+              wsClient.close(force: true);
             }
             return 1;
           }
@@ -417,7 +422,7 @@ Future<Map<String, Object?>?> httpJson(
   String path, {
   Duration timeout = const Duration(seconds: 5),
 }) async {
-  final c = HttpClient()..findProxy = null; // 绕开宿主 http_proxy
+  final c = HttpClient()..findProxy = (_) => 'DIRECT'; // 绕开宿主 http_proxy
   c.connectionTimeout = timeout;
   try {
     final req = await c.getUrl(Uri.parse('http://127.0.0.1:$port$path'));
@@ -448,7 +453,7 @@ Future<Map<String, Object?>?> findPage(
 }) async {
   final deadline = DateTime.now().add(within);
   while (DateTime.now().isBefore(deadline)) {
-    final c = HttpClient()..findProxy = null;
+    final c = HttpClient()..findProxy = (_) => 'DIRECT';
     c.connectionTimeout = const Duration(seconds: 3);
     try {
       final req = await c.getUrl(Uri.parse('http://127.0.0.1:$port/json/list'));

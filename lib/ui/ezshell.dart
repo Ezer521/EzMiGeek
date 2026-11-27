@@ -414,9 +414,17 @@ class EzShellPainter extends CustomPainter {
   /// 2026-10-19 用户去掉标题四字后由说明行顶位，左沿 = secX）。
   void _infoLine(Canvas c) {
     final dd = Geo.c3InfoIcoD;
+    final txX = Geo.secX + dd + 15;
     icoInfo(c, Rect.fromLTWH(Geo.secX, Geo.secCy - dd / 2, dd, dd), Pal.info);
-    ezTxt(c, state.ui.infoLine, EzFont.fInfo(Pal.ink2), Geo.secX + dd + 15, Geo.secCy,
-        EzAlign.left);
+    ezTxt(
+      c,
+      state.ui.infoLine,
+      EzFont.fInfo(Pal.ink2),
+      txX,
+      Geo.secCy,
+      EzAlign.left,
+      maxW: Geo.cr - txX,
+    );
   }
 
   Rect _rowIconBox(double cy) =>
